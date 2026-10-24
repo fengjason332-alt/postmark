@@ -80,6 +80,7 @@ export default function App() {
     store(HOME_KEY, h)
     setPicking(false)
     setHomeOpen(false)
+    globe.current?.setRotating(true)
     globe.current?.lookAt(h, 2)
   }
 
@@ -93,6 +94,7 @@ export default function App() {
     store(HOME_KEY, null)
     setHomeOpen(false)
     setPicking(false)
+    globe.current?.setRotating(true)
     globe.current?.lookAt(data.trips.home, 2)
   }
 
