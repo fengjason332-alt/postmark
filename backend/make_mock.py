@@ -1,4 +1,4 @@
-"""Generate invented mock data for the frontend (data contract §6, schema 1.0).
+"""Generate invented mock data for the frontend (data contract §6, schema 1.1).
 
 Writes:
   frontend/public/mock/trips.json
@@ -23,12 +23,19 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MOCK_DIR = REPO_ROOT / "frontend" / "public" / "mock"
 THUMBS_DIR = MOCK_DIR / "thumbs"
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
+# Home-circle radius options (km); mirrors RADIUS_OPTIONS_KM / DEFAULT_RADIUS_KM in segment.py.
+RADIUS_OPTIONS_KM = [10, 25, 50, 100, 200]
+DEFAULT_RADIUS_KM = 50
 # Fixed so that re-running the script gives byte-identical output.
 GENERATED_AT = "2026-10-24T12:00:00-04:00"
 
 HOME = {"city": "Boston", "country": "United States", "country_code": "US",
         "lat": 42.3601, "lng": -71.0589}
+
+# One home period covering the invented data (city-centre coordinates only).
+HOMES = [{"from_date": "2026-01-01", "to_date": "2026-12-31", "city": "Boston",
+          "country_code": "US", "lat": 42.3601, "lng": -71.0589}]
 
 CITIES = {
     "city_newyork_us": {"name": "New York", "country": "United States", "country_code": "US",
@@ -37,6 +44,8 @@ CITIES = {
                          "lat": 45.5019, "lng": -73.5674},
     "city_quebeccity_ca": {"name": "Quebec City", "country": "Canada", "country_code": "CA",
                            "lat": 46.8139, "lng": -71.2080},
+    "city_providence_us": {"name": "Providence", "country": "United States", "country_code": "US",
+                           "lat": 41.8240, "lng": -71.4128},
 }
 
 PERSONAS = {"food": "Food Explorer", "city": "Urban Wanderer", "nature": "Nature Seeker",
@@ -54,6 +63,16 @@ TRIPS = [
             ("2026-03-15T11:20:13-04:00", 40.7829, -73.9654, "city_newyork_us", "landscape", ["nature"]),
             ("2026-03-16T14:47:55-04:00", 40.7061, -73.9969, "city_newyork_us", "landscape", ["city", "architecture"]),
             ("2026-03-17T09:12:30-04:00", 40.7420, -74.0048, "city_newyork_us", "portrait", ["food"]),
+        ],
+    },
+    {
+        "slug": "providence",
+        "title": "Providence",
+        "color": (122, 139, 90),  # moss green
+        "photos": [
+            ("2026-05-09T11:08:24-04:00", 41.8268, -71.4026, "city_providence_us", "landscape", ["city"]),
+            ("2026-05-09T13:41:07-04:00", 41.8236, -71.4189, "city_providence_us", "portrait", ["food"]),
+            ("2026-05-09T16:22:50-04:00", 41.8302, -71.4087, "city_providence_us", "landscape", ["architecture"]),
         ],
     },
     {
@@ -171,16 +190,31 @@ def main():
     THUMBS_DIR.mkdir(parents=True, exist_ok=True)
 
     specs = sorted(TRIPS, key=lambda s: min(p[0] for p in s["photos"]))
-    trips = [build_trip(i, s) for i, s in enumerate(specs)]
+    all_trips = [build_trip(i, s) for i, s in enumerate(specs)]  # thumbnails are written here
+
+    # A trip is in the list for radius R when its distance_km > R. Re-index within each list.
+    trips_by_radius = {}
+    for radius in RADIUS_OPTIONS_KM:
+        kept = [t for t in all_trips if t["distance_km"] > radius]
+        trips_by_radius[str(radius)] = [{**t, "index": i} for i, t in enumerate(kept)]
+    trips = trips_by_radius[str(DEFAULT_RADIUS_KM)]
 
     trips_json = {"schema_version": SCHEMA_VERSION, "generated_at": GENERATED_AT,
-                  "home": HOME, "trips": trips}
+                  "home": HOME, "homes": HOMES,
+                  "default_radius_km": DEFAULT_RADIUS_KM, "radius_options_km": RADIUS_OPTIONS_KM,
+                  "trips": trips, "trips_by_radius": trips_by_radius}
 
-    years = sorted({t["start_date"][:4] for t in trips})
+    def stats_for(trip_list):
+        years = sorted({t["start_date"][:4] for t in trip_list})
+        return {"all_time": summarize(trip_list),
+                "by_year": {y: summarize([t for t in trip_list if t["start_date"][:4] == y]) for y in years}}
+
+    by_radius = {r: stats_for(tl) for r, tl in trips_by_radius.items()}
     stats_json = {
         "schema_version": SCHEMA_VERSION,
-        "all_time": summarize(trips),
-        "by_year": {y: summarize([t for t in trips if t["start_date"][:4] == y]) for y in years},
+        "all_time": by_radius[str(DEFAULT_RADIUS_KM)]["all_time"],
+        "by_year": by_radius[str(DEFAULT_RADIUS_KM)]["by_year"],
+        "by_radius": by_radius,
     }
 
     for name, obj in (("trips.json", trips_json), ("stats.json", stats_json)):
@@ -188,8 +222,9 @@ def main():
             json.dump(obj, f, indent=2, ensure_ascii=False)
             f.write("\n")
 
-    n_photos = sum(t["photo_count"] for t in trips)
-    print(f"Wrote {len(trips)} trips, {n_photos} photos, {2 * n_photos} thumbnails to "
+    n_photos = sum(t["photo_count"] for t in all_trips)
+    print(f"Wrote {len(all_trips)} trips ({len(trips)} at the default radius), {n_photos} photos, "
+          f"{2 * n_photos} thumbnails to "
           f"{MOCK_DIR.relative_to(REPO_ROOT)}/")
 
 

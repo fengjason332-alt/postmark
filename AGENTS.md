@@ -129,15 +129,21 @@ The **only** interface between backend and frontend is these files. 前后端**�
 | Images / 图片 | WebP only: `_s` = 400px wide (grids), `_l` = 1600px long edge (viewer). No EXIF. No originals. |
 | Home / 家 | City-centre coordinates only, never the real address. 只给城市中心坐标。 |
 | Visuals / 视觉 | Colours, stamp sizes, animation = frontend. Backend only gives numbers like `index`, `photo_count`. |
-| Version / 版本 | Top-level `schema_version`. Current: **`"1.0"`**. |
+| Version / 版本 | Top-level `schema_version`. Current: **`"1.1"`**. |
+| Radius / 半径 | Radius keys in `trips_by_radius` / `by_radius` are **strings of an integer km value** (`"10"`, `"25"`, `"50"`, `"100"`, `"200"`). `homes` follow the Home rule: city-centre coordinates only. 半径的键是整数公里数的**字符串**；`homes` 同样只给城市中心坐标。 |
 
 ### trips.json
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "generated_at": "2026-10-24T18:00:00-04:00",
   "home": {"city": "Boston", "country": "United States", "country_code": "US", "lat": 42.3601, "lng": -71.0589},
+  "homes": [
+    {"from_date": "2026-01-01", "to_date": "2026-12-31", "city": "Boston", "country_code": "US", "lat": 42.3601, "lng": -71.0589}
+  ],
+  "default_radius_km": 50,
+  "radius_options_km": [10, 25, 50, 100, 200],
   "trips": [
     {
       "id": "trip_20260314_newyork",
@@ -161,7 +167,14 @@ The **only** interface between backend and frontend is these files. 前后端**�
          "width": 1600, "height": 1200, "tags": ["city"]}
       ]
     }
-  ]
+  ],
+  "trips_by_radius": {
+    "10":  [ "... trips at radius 10 km, same trip shape as above, index 0..n-1 ..." ],
+    "25":  [ "..." ],
+    "50":  [ "... identical to the top-level trips ..." ],
+    "100": [ "..." ],
+    "200": [ "..." ]
+  }
 }
 ```
 
@@ -173,17 +186,33 @@ A photo with no GPS but taken during a trip's dates is still included: `"has_gps
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "all_time": {"trips": 14, "cities": 21, "countries": 5, "days_away": 96, "distance_km": 28400,
                "photos_total": 9812, "photos_with_gps": 8120, "top_tags": [["food", 0.31], ["nature", 0.24]], "persona": "Food Explorer"},
   "by_year": {
     "2026": {"trips": 6, "cities": 11, "countries": 3, "days_away": 47, "distance_km": 12840,
              "photos_total": 2431, "photos_with_gps": 1980, "top_tags": [["food", 0.35]], "persona": "Food Explorer"}
+  },
+  "by_radius": {
+    "10":  {"all_time": {"...": "same stat shape as above"}, "by_year": {"2026": {"...": "..."}}},
+    "50":  {"all_time": {"...": "identical to the top-level all_time"}, "by_year": {"2026": {"...": "..."}}},
+    "200": {"all_time": {"...": "..."}, "by_year": {"2026": {"...": "..."}}}
   }
 }
 ```
 
 Numbers above are examples only. 以上数字只是示例。The "This year / All time" toggle reads `by_year["<year>"]` and `all_time`.
+
+### Changes in 1.1 / 1.1 的变化
+
+- **Added / 新增**: `default_radius_km` (50), `radius_options_km`, `homes` (one city-centre home per period, sorted by `from_date`, non-overlapping, so the globe can draw the home circle for the right period), `trips_by_radius` in trips.json, and `by_radius` in stats.json. A trip is in the list for radius R if it has a travel day outside the R-km home circle.
+  trips.json 新增 `default_radius_km`、`radius_options_km`、`homes`（每个时期一个城市中心的家，按 `from_date` 排序、不重叠，前端据此画对应时期的家圈）和 `trips_by_radius`；stats.json 新增 `by_radius`。某半径 R 的列表包含所有在 R 公里家圈之外有出行日的旅程。
+- **Backward compatible / 向后兼容**: `trips`, `home`, `all_time` and `by_year` keep their meaning, now at the default radius (`trips` = `trips_by_radius["50"]`, `all_time`/`by_year` = `by_radius["50"]`). A 1.0 reader keeps working unchanged.
+  `trips`、`home`、`all_time`、`by_year` 含义不变，对应默认半径；1.0 的读取方无需修改。
+- **Frontend / 前端**: the radius toggle reads `trips_by_radius` / `by_radius`. 半径开关读取 `trips_by_radius` / `by_radius`。
+- **Radius lists are independent / 各半径列表相互独立**: every radius list comes from its own segmentation run, so a trip's boundaries and `id` can differ between radii (trips may merge or split). The frontend must not assume a trip `id` is stable across radii. `index` restarts at 0 within each radius list. The mock data simplifies this by filtering one fixed set of trips.
+  每个半径的列表来自单独的一次分段运行，所以同一次旅行的边界和 `id` 在不同半径下可能不同（旅程可能合并或拆分）；前端不能假设 `id` 在不同半径之间稳定。`index` 在每个半径列表内都从 0 重新开始。假数据做了简化：只是从一组固定的旅程里按半径过滤。
+- **`home` vs `homes` / `home` 与 `homes`**: `home` equals the most recent entry of `homes` (same city centre). `home` 等于 `homes` 里最近的一项（同一个城市中心）。
 
 ## 7. Tech stack and commands / 技术栈与命令
 
@@ -213,7 +242,7 @@ City database / 城市数据库：`cities15000.zip` from https://download.geonam
 | --- | --- |
 | Stay point / 停留点 | consecutive photos within 1 km and 3 h are merged |
 | Home / 家 | area with the most photos between 22:00–06:00, recomputed per quarter |
-| Trip / 旅程 | > 100 km from home **and** overnight; returning home ends the trip |
+| Trip / 旅程 | Home circle: a date is a travel day if any GPS photo is > `radius_km` from that date's home (default 50; options 10/25/50/100/200); a date ends a trip only if all its GPS photos are within the circle; days without GPS photos are bridged up to 2 days; `min_days = 1` (day trips count) / 家圈规则：某天只要有一张 GPS 照片距当天的家超过 `radius_km`（默认 50；可选 10/25/50/100/200）就算出行日；只有当天所有 GPS 照片都在圈内才结束旅程；没有 GPS 照片的日子最多桥接 2 天；`min_days = 1`（一日游也算） |
 | Match for validation / 验证命中 | ≥ 50% date overlap with a ground-truth trip |
 | Baseline / 基线 | "any day with a photo > 100 km from home is a travel day" |
 
