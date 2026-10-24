@@ -99,9 +99,10 @@ export default function App() {
   }
 
   if (error) return <div className="loading">Could not load trips: {error}</div>
-  if (!data) return <div className="loading">Opening the map…</div>
+  if (!data) return <div className="loading">Unfolding memories…</div>
 
-  const stats = summarize(visible)
+  // Totals for the whole selected range, not a running count while the timeline plays.
+  const stats = summarize(inRange)
   const persona = range === 'year' ? data.stats?.by_year?.[thisYear()]?.persona : data.stats?.all_time?.persona
 
   return (
@@ -120,8 +121,8 @@ export default function App() {
 
       <header className="masthead">
         <div className="brand">
-          <h1>Unfolding Memories</h1>
-          <span className="tagline">Postmark · your camera roll, unfolded into a travel journal</span>
+          <h1>Postmark</h1>
+          <span className="tagline">your camera roll, unfolded into a travel journal</span>
         </div>
         <div className="controls">
           <div className="range" role="tablist" aria-label="Time range">
