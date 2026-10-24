@@ -3,7 +3,10 @@
 Reads data/processed/photos_clean.csv and writes (all git-ignored, local only)
   data/processed/trips_pred.csv   one row per detected trip,
   data/processed/stays.csv        every stay point (trip_id empty outside trips),
-  data/processed/photo_trips.csv  photo_id -> trip_id for photos inside a trip.
+  data/processed/photo_trips.csv  photo_id -> trip_id for photos inside a trip,
+  data/processed/homes.csv        home periods (from_date, to_date, lat, lng; full precision).
+With --all-radii the three trip files are written once per radius as trips_pred_r{R}.csv,
+stays_r{R}.csv and photo_trips_r{R}.csv for every R in RADIUS_OPTIONS_KM (homes.csv once).
 
 Algorithm (defaults in DEFAULT_PARAMS, see AGENTS.md section 7):
   1. Stay points: consecutive GPS photos within stay_radius_km of the stay's running centroid
@@ -11,11 +14,13 @@ Algorithm (defaults in DEFAULT_PARAMS, see AGENTS.md section 7):
   2. Home: night photos (local hour >= 22 or < 6) are clustered with DBSCAN (haversine);
      the biggest cluster's centroid is home. Recomputed per calendar quarter ("quarterly")
      or computed once ("fixed").
-  3. Day classes, per local date from its GPS photos only: away (at least one photo
-     > trip_min_km from home, even if the date also has photos near home), home (ALL GPS
-     photos within home_radius_km), otherwise neutral (e.g. only 25-100 km photos, a mix of
-     near-home and 25-100 km photos, or no GPS photos).
-  4. Trips: runs of away days; short neutral gaps without a home day are bridged.
+  3. Home circle: the user sets one radius (radius_km, default DEFAULT_RADIUS_KM) around
+     home. Inside the circle = home, outside = travel. Day classes, per local date from its
+     GPS photos only: away (at least one photo > radius_km from that date's home, even if
+     the date also has photos inside the circle), home (ALL GPS photos within radius_km;
+     exactly on the circle counts as inside), neutral (dates with no GPS photos only).
+  4. Trips: runs of away days; short neutral gaps (max_gap_days) are bridged, a home day ends
+     the trip. Day trips count (min_days defaults to 1).
 If data/ground_truth.csv exists, each ground-truth trip is compared with the best
 overlapping predicted trip (Jaccard day overlap). Precision / recall / F1 are NOT computed
 here; they come from backend/validate.py.
@@ -40,6 +45,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 EARTH_RADIUS_KM = 6371.0088
 
+RADIUS_OPTIONS_KM = [10, 25, 50, 100, 200]
+DEFAULT_RADIUS_KM = 50
+
 DEFAULT_PARAMS = {
     "stay_radius_km": 1.0,
     "stay_gap_hours": 3.0,
@@ -49,10 +57,9 @@ DEFAULT_PARAMS = {
     "min_night_photos": 10,
     "night_start_hour": 22,        # night = local hour >= 22 or < 6
     "night_end_hour": 6,
-    "trip_min_km": 100.0,
-    "home_radius_km": 25.0,
+    "radius_km": float(DEFAULT_RADIUS_KM),
     "max_gap_days": 2,
-    "min_days": 2,
+    "min_days": 1,
 }
 HOME_MODES = ("quarterly", "fixed")
 NO_HOME_MESSAGE = "no home could be detected"
@@ -62,6 +69,7 @@ TRIP_COLUMNS = ["person", "trip_id", "start_date", "end_date", "days", "max_dist
                 "photo_count", "n_stays", "cities"]
 STAY_COLUMNS = ["trip_id", "stay_id", "start", "end", "lat", "lng", "photo_count"]
 PHOTO_TRIP_COLUMNS = ["photo_id", "trip_id"]
+HOME_COLUMNS = ["from_date", "to_date", "lat", "lng"]
 MATCH_COLUMNS = ["gt_start", "gt_end", "pred_trip_id", "pred_start", "pred_end",
                  "overlap_pct", "matched"]
 
@@ -70,6 +78,7 @@ GROUND_TRUTH_REL = Path("data") / "ground_truth.csv"
 TRIPS_REL = Path("data") / "processed" / "trips_pred.csv"
 STAYS_REL = Path("data") / "processed" / "stays.csv"
 PHOTO_TRIPS_REL = Path("data") / "processed" / "photo_trips.csv"
+HOMES_REL = Path("data") / "processed" / "homes.csv"
 
 DAY_HOME = "home"
 DAY_AWAY = "away"
@@ -245,25 +254,25 @@ def classify_days(prepared, homes, params):
     """Return ([(day, class)] for every calendar day spanned, GPS rows with dist_km).
 
     Per date, using GPS photos only and each photo's distance to that date's home:
-    away if any photo is > trip_min_km; home if all photos are <= home_radius_km;
-    otherwise neutral (including dates without GPS photos).
+    away if any photo is > radius_km; home if all photos are <= radius_km (exactly on the
+    circle is inside); neutral only for dates without GPS photos.
     """
     gps = prepared[prepared["has_gps"]].copy()
     home_points = [homes[quarter_of(d)] for d in gps["day"]]
     gps["dist_km"] = haversine_km(gps["lat"].to_numpy(), gps["lng"].to_numpy(),
                                   [h[0] for h in home_points], [h[1] for h in home_points])
-    # A date is away if ANY GPS photo is far (a travel day often starts or ends with photos
-    # near home); it is a home day only if ALL its GPS photos are near home.
-    far_days = set(gps.loc[gps["dist_km"] > params["trip_min_km"], "day"])
-    near_only_days = set(gps.groupby("day")["dist_km"].max()
-                         .loc[lambda dist: dist <= params["home_radius_km"]].index)
+    # A date is away if ANY GPS photo is outside the circle (a travel day often starts or ends
+    # with photos near home); it is a home day only if ALL its GPS photos are inside.
+    max_dist = gps.groupby("day")["dist_km"].max()
+    far_days = set(max_dist.index[max_dist > params["radius_km"]])
+    inside_days = set(max_dist.index[max_dist <= params["radius_km"]])
     first_day, last_day = min(prepared["day"]), max(prepared["day"])
     classes = []
     for offset in range((last_day - first_day).days + 1):
         day = first_day + timedelta(days=offset)
         if day in far_days:
             classes.append((day, DAY_AWAY))
-        elif day in near_only_days:
+        elif day in inside_days:
             classes.append((day, DAY_HOME))
         else:
             classes.append((day, DAY_NEUTRAL))
@@ -292,8 +301,43 @@ def segment_days(classes, params):
     return [(s, e) for s, e in trips if (e - s).days + 1 >= params["min_days"]]
 
 
+def quarter_bounds(quarter):
+    """(first day, last day) of a (year, quarter)."""
+    year, number = quarter
+    first = date(year, 3 * (number - 1) + 1, 1)
+    nxt = date(year + 1, 1, 1) if number == 4 else date(year, 3 * number + 1, 1)
+    return first, nxt - timedelta(days=1)
+
+
+def build_homes_table(homes, first_day, last_day, eps_km):
+    """Home periods: consecutive quarters with nearly the same home are merged into one row.
+
+    A quarter joins the current period when its home is within eps_km (haversine) of the
+    period's FIRST quarter home; the period's lat/lng is the mean of its quarters' homes.
+    from_date is the first day of the period's first quarter (or first_day if later), to_date
+    the last day of its last quarter (or last_day if earlier). Coordinates keep full precision
+    (local only). Day classification still uses each quarter's own home.
+    """
+    periods = []
+    for quarter in sorted(homes):
+        home = homes[quarter]
+        if periods and float(haversine_km(*periods[-1]["homes"][0], *home)) <= eps_km:
+            periods[-1]["homes"].append(home)
+            periods[-1]["last_quarter"] = quarter
+        else:
+            periods.append({"homes": [home], "first_quarter": quarter, "last_quarter": quarter})
+    rows = []
+    for period in periods:
+        start = max(quarter_bounds(period["first_quarter"])[0], first_day)
+        end = min(quarter_bounds(period["last_quarter"])[1], last_day)
+        rows.append({"from_date": start.isoformat(), "to_date": end.isoformat(),
+                     "lat": float(np.mean([h[0] for h in period["homes"]])),
+                     "lng": float(np.mean([h[1] for h in period["homes"]]))})
+    return pd.DataFrame(rows, columns=HOME_COLUMNS)
+
+
 def run_segmentation(photos_df, params=None):
-    """Full pipeline. Returns a dict with trips, stays, photo_trips, home_info, gps_photos."""
+    """Full pipeline. Returns a dict with trips, stays, photo_trips, homes, home_info, gps_photos."""
     params = resolve_params(params)
     person = ""
     if "person" in photos_df.columns and len(photos_df):
@@ -344,8 +388,10 @@ def run_segmentation(photos_df, params=None):
     assigned = prepared[prepared["trip_id"] != ""]
     photo_trips_df = (assigned.sort_values("trip_id", kind="mergesort")[PHOTO_TRIP_COLUMNS]
                       .reset_index(drop=True))
+    homes_df = build_homes_table(homes, min(prepared["day"]), max(prepared["day"]),
+                                  params["home_eps_km"])
     return {"trips": trips_df, "stays": stays_df, "photo_trips": photo_trips_df,
-            "home_info": home_info, "gps_photos": int(prepared["has_gps"].sum())}
+            "homes": homes_df, "home_info": home_info, "gps_photos": int(prepared["has_gps"].sum())}
 
 
 def detect_trips(photos_df, params=None):
@@ -396,6 +442,8 @@ def build_parser():
             parser.add_argument(f"--{key}", choices=HOME_MODES, default=default)
         else:
             parser.add_argument(f"--{key}", type=type(default), default=default)
+    parser.add_argument("--all-radii", action="store_true",
+                        help="run every radius in RADIUS_OPTIONS_KM and write *_r{R}.csv files")
     return parser
 
 
@@ -431,6 +479,19 @@ def format_report(result, matches):
     return lines
 
 
+def suffixed(rel, suffix):
+    """data/processed/trips_pred.csv + "_r50" -> data/processed/trips_pred_r50.csv."""
+    return rel.with_name(rel.stem + suffix + rel.suffix)
+
+
+def write_outputs(root, result, suffix=""):
+    for frame, rel in ((result["trips"], TRIPS_REL), (result["stays"], STAYS_REL),
+                       (result["photo_trips"], PHOTO_TRIPS_REL)):
+        path = root / suffixed(rel, suffix)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(path, index=False)
+
+
 def main(argv=None, root=REPO_ROOT):
     args = build_parser().parse_args(argv)
     params = {key: getattr(args, key) for key in DEFAULT_PARAMS}
@@ -441,31 +502,47 @@ def main(argv=None, root=REPO_ROOT):
     except Exception:
         _fail(f"could not read {INPUT_REL.as_posix()}")
 
-    try:
-        result = run_segmentation(photos, params)
-    except ValueError as exc:
-        _fail(NO_HOME_MESSAGE if str(exc) == NO_HOME_MESSAGE else "segmentation failed")
-    except Exception:
-        _fail("segmentation failed")
+    # One run per radius with --all-radii (it ignores --radius_km), otherwise a single run.
+    runs = [(radius, {**params, "radius_km": float(radius)}) for radius in RADIUS_OPTIONS_KM]
+    if not args.all_radii:
+        runs = [(None, params)]
+    results = []
+    for radius, run_params in runs:
+        try:
+            results.append((radius, run_segmentation(photos, run_params)))
+        except ValueError as exc:
+            _fail(NO_HOME_MESSAGE if str(exc) == NO_HOME_MESSAGE else "segmentation failed")
+        except Exception:
+            _fail("segmentation failed")
 
-    matches = None
+    matches_by_run = [None] * len(results)
     if (root / GROUND_TRUTH_REL).exists():
         try:
             gt = pd.read_csv(root / GROUND_TRUTH_REL, dtype=str, keep_default_na=False)
             person = str(photos["person"].iloc[0])
-            matches = match_ground_truth(result["trips"], gt, person)
+            matches_by_run = [match_ground_truth(result["trips"], gt, person)
+                              for _, result in results]
         except Exception:
             _fail(f"could not read {GROUND_TRUTH_REL.as_posix()}")
 
     try:
-        for frame, rel in ((result["trips"], TRIPS_REL), (result["stays"], STAYS_REL),
-                           (result["photo_trips"], PHOTO_TRIPS_REL)):
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            frame.to_csv(root / rel, index=False)
+        for radius, result in results:
+            write_outputs(root, result, "" if radius is None else f"_r{radius}")
+        (root / HOMES_REL).parent.mkdir(parents=True, exist_ok=True)
+        results[0][1]["homes"].to_csv(root / HOMES_REL, index=False)
     except Exception:
         _fail("could not write outputs")
 
-    print("\n".join(format_report(result, matches)))
+    if not args.all_radii:
+        print("\n".join(format_report(results[0][1], matches_by_run[0])))
+        return
+    for (radius, result), matches in zip(results, matches_by_run):
+        summary = f"r={radius} km: {len(result['trips'])} trips, "
+        if matches is None:
+            summary += "ground truth: not found"
+        else:
+            summary += f"matched {int(matches['matched'].sum())} of {len(matches)}"
+        print(summary)
 
 
 if __name__ == "__main__":

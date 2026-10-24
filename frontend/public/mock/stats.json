@@ -1,53 +1,315 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "all_time": {
-    "trips": 2,
-    "cities": 3,
+    "trips": 3,
+    "cities": 4,
     "countries": 2,
-    "days_away": 7,
-    "distance_km": 942,
-    "photos_total": 10,
-    "photos_with_gps": 10,
+    "days_away": 8,
+    "distance_km": 1008,
+    "photos_total": 13,
+    "photos_with_gps": 13,
     "top_tags": [
       [
         "food",
-        0.4
+        0.38
       ],
       [
         "architecture",
-        0.3
+        0.31
       ],
       [
         "city",
-        0.3
+        0.31
       ]
     ],
     "persona": "Food Explorer"
   },
   "by_year": {
     "2026": {
-      "trips": 2,
-      "cities": 3,
+      "trips": 3,
+      "cities": 4,
       "countries": 2,
-      "days_away": 7,
-      "distance_km": 942,
-      "photos_total": 10,
-      "photos_with_gps": 10,
+      "days_away": 8,
+      "distance_km": 1008,
+      "photos_total": 13,
+      "photos_with_gps": 13,
       "top_tags": [
         [
           "food",
-          0.4
+          0.38
         ],
         [
           "architecture",
-          0.3
+          0.31
         ],
         [
           "city",
-          0.3
+          0.31
         ]
       ],
       "persona": "Food Explorer"
+    }
+  },
+  "by_radius": {
+    "10": {
+      "all_time": {
+        "trips": 3,
+        "cities": 4,
+        "countries": 2,
+        "days_away": 8,
+        "distance_km": 1008,
+        "photos_total": 13,
+        "photos_with_gps": 13,
+        "top_tags": [
+          [
+            "food",
+            0.38
+          ],
+          [
+            "architecture",
+            0.31
+          ],
+          [
+            "city",
+            0.31
+          ]
+        ],
+        "persona": "Food Explorer"
+      },
+      "by_year": {
+        "2026": {
+          "trips": 3,
+          "cities": 4,
+          "countries": 2,
+          "days_away": 8,
+          "distance_km": 1008,
+          "photos_total": 13,
+          "photos_with_gps": 13,
+          "top_tags": [
+            [
+              "food",
+              0.38
+            ],
+            [
+              "architecture",
+              0.31
+            ],
+            [
+              "city",
+              0.31
+            ]
+          ],
+          "persona": "Food Explorer"
+        }
+      }
+    },
+    "25": {
+      "all_time": {
+        "trips": 3,
+        "cities": 4,
+        "countries": 2,
+        "days_away": 8,
+        "distance_km": 1008,
+        "photos_total": 13,
+        "photos_with_gps": 13,
+        "top_tags": [
+          [
+            "food",
+            0.38
+          ],
+          [
+            "architecture",
+            0.31
+          ],
+          [
+            "city",
+            0.31
+          ]
+        ],
+        "persona": "Food Explorer"
+      },
+      "by_year": {
+        "2026": {
+          "trips": 3,
+          "cities": 4,
+          "countries": 2,
+          "days_away": 8,
+          "distance_km": 1008,
+          "photos_total": 13,
+          "photos_with_gps": 13,
+          "top_tags": [
+            [
+              "food",
+              0.38
+            ],
+            [
+              "architecture",
+              0.31
+            ],
+            [
+              "city",
+              0.31
+            ]
+          ],
+          "persona": "Food Explorer"
+        }
+      }
+    },
+    "50": {
+      "all_time": {
+        "trips": 3,
+        "cities": 4,
+        "countries": 2,
+        "days_away": 8,
+        "distance_km": 1008,
+        "photos_total": 13,
+        "photos_with_gps": 13,
+        "top_tags": [
+          [
+            "food",
+            0.38
+          ],
+          [
+            "architecture",
+            0.31
+          ],
+          [
+            "city",
+            0.31
+          ]
+        ],
+        "persona": "Food Explorer"
+      },
+      "by_year": {
+        "2026": {
+          "trips": 3,
+          "cities": 4,
+          "countries": 2,
+          "days_away": 8,
+          "distance_km": 1008,
+          "photos_total": 13,
+          "photos_with_gps": 13,
+          "top_tags": [
+            [
+              "food",
+              0.38
+            ],
+            [
+              "architecture",
+              0.31
+            ],
+            [
+              "city",
+              0.31
+            ]
+          ],
+          "persona": "Food Explorer"
+        }
+      }
+    },
+    "100": {
+      "all_time": {
+        "trips": 2,
+        "cities": 3,
+        "countries": 2,
+        "days_away": 7,
+        "distance_km": 942,
+        "photos_total": 10,
+        "photos_with_gps": 10,
+        "top_tags": [
+          [
+            "food",
+            0.4
+          ],
+          [
+            "architecture",
+            0.3
+          ],
+          [
+            "city",
+            0.3
+          ]
+        ],
+        "persona": "Food Explorer"
+      },
+      "by_year": {
+        "2026": {
+          "trips": 2,
+          "cities": 3,
+          "countries": 2,
+          "days_away": 7,
+          "distance_km": 942,
+          "photos_total": 10,
+          "photos_with_gps": 10,
+          "top_tags": [
+            [
+              "food",
+              0.4
+            ],
+            [
+              "architecture",
+              0.3
+            ],
+            [
+              "city",
+              0.3
+            ]
+          ],
+          "persona": "Food Explorer"
+        }
+      }
+    },
+    "200": {
+      "all_time": {
+        "trips": 2,
+        "cities": 3,
+        "countries": 2,
+        "days_away": 7,
+        "distance_km": 942,
+        "photos_total": 10,
+        "photos_with_gps": 10,
+        "top_tags": [
+          [
+            "food",
+            0.4
+          ],
+          [
+            "architecture",
+            0.3
+          ],
+          [
+            "city",
+            0.3
+          ]
+        ],
+        "persona": "Food Explorer"
+      },
+      "by_year": {
+        "2026": {
+          "trips": 2,
+          "cities": 3,
+          "countries": 2,
+          "days_away": 7,
+          "distance_km": 942,
+          "photos_total": 10,
+          "photos_with_gps": 10,
+          "top_tags": [
+            [
+              "food",
+              0.4
+            ],
+            [
+              "architecture",
+              0.3
+            ],
+            [
+              "city",
+              0.3
+            ]
+          ],
+          "persona": "Food Explorer"
+        }
+      }
     }
   }
 }
