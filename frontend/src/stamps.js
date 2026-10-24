@@ -15,21 +15,51 @@ export const INK_FILTER = `
   </filter>
 </svg>`
 
+// A square vermilion chop reading HO/ME, the way a name seal is cut in two columns.
 export function homeSeal(city) {
   return `
 <svg viewBox="0 0 64 64" class="seal-svg" role="img" aria-label="Home: ${esc(city)}">
   <g filter="url(#ink-rough)">
     <rect x="4" y="4" width="56" height="56" rx="6" fill="#c23b22"/>
     <rect x="9" y="9" width="46" height="46" rx="3" fill="none" stroke="#fbf3e6" stroke-width="2"/>
-    <text x="32" y="43" text-anchor="middle" font-family="'Noto Serif SC', serif" font-weight="700"
-      font-size="28" fill="#fbf3e6">家</text>
+    <text text-anchor="middle" font-family="Fraunces, Georgia, serif" font-weight="700" font-size="17"
+      letter-spacing="1" fill="#fbf3e6"><tspan x="32" y="30">HO</tspan><tspan x="32" y="48">ME</tspan></text>
   </g>
+</svg>`
+}
+
+// Ink-wash style: each city is a small red seal with the name cut in white, the way
+// collectors stamp a painting. Repeat visits add more seals beside it.
+function citySeal(city) {
+  const name = city.name.toUpperCase()
+  const words = name.length > 9 && name.includes(' ') ? name.split(' ') : [name]
+  const size = Math.max(9, Math.min(15, 70 / Math.max(...words.map((w) => w.length))))
+  const lines = words
+    .map((w, i) => `<tspan x="50" dy="${i === 0 ? 0 : size * 1.05}">${esc(w)}</tspan>`)
+    .join('')
+  const y = 50 - ((words.length - 1) * size * 1.05) / 2 + size * 0.35 - 6
+  const year = city.visits[0].arrive.slice(0, 4)
+  const seal = (dx, dy, rot, opacity) => `
+  <g transform="translate(${dx} ${dy}) rotate(${rot} 50 50)" opacity="${opacity}" filter="url(#ink-rough)">
+    <rect x="12" y="16" width="76" height="68" rx="9" fill="#b8321f"/>
+    <rect x="17" y="21" width="66" height="58" rx="5" fill="none" stroke="#f6efe2" stroke-width="1.6"/>
+    <text text-anchor="middle" font-family="'Cormorant Garamond', Georgia, serif" font-weight="700"
+      font-size="${size}" letter-spacing="0.5" fill="#f6efe2" y="${y}">${lines}</text>
+    <text x="50" y="74" text-anchor="middle" font-family="'Cormorant Garamond', Georgia, serif"
+      font-size="9" letter-spacing="2" fill="#f6efe2">${year}</text>
+  </g>`
+  const extra = city.visits.slice(1, 3).map((_, i) => seal(10 + i * 8, 9 + i * 7, 6 + i * 5, 0.75)).join('')
+  return `
+<svg viewBox="-4 -4 124 124" class="postmark-svg seal-city" role="img"
+  aria-label="${esc(city.name)}: ${city.visits.length} visit(s), ${city.photo_count} photos">
+  ${extra}${seal(0, 0, -4, 0.95)}
 </svg>`
 }
 
 // A cancellation postmark: double ring, city name around the rim, date in the middle.
 // Repeat visits are over-stamped with a second, rotated impression.
-export function postmark(city, color) {
+export function postmark(city, color, style = 'journal') {
+  if (style === 'ink') return citySeal(city)
   const id = `pm-${++uid}`
   const first = city.visits[0]
   const label = `${city.name} · ${city.country}`.toUpperCase()

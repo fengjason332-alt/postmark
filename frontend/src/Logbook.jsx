@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { shortDate, dateRange, jitter, photosByDay, tripColor } from './data.js'
 import { postmark } from './stamps.js'
-import { citiesOf } from './data.js'
+import { citiesOf, currentStyle } from './data.js'
 
 // A trip opens as a two-page journal: cover on the left, days of taped photos on the right.
 export default function Logbook({ trip, base, onClose }) {
@@ -38,7 +38,7 @@ export default function Logbook({ trip, base, onClose }) {
               </li>
             ))}
           </ol>
-          <div className="cover-stamp" dangerouslySetInnerHTML={{ __html: postmark(citiesOf([trip])[0], color) }} />
+          <div className="cover-stamp" dangerouslySetInnerHTML={{ __html: postmark(citiesOf([trip])[0], color, currentStyle()) }} />
         </section>
 
         <section className="page days">

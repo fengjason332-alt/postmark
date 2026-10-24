@@ -2,6 +2,7 @@
 // pigment-pooled countries and a pen-drawn coastline.
 import { feature } from 'topojson-client'
 import world from 'world-atlas/countries-50m.json'
+import landTopo from 'world-atlas/land-50m.json'
 
 const W = 4096
 const H = 2048
@@ -119,5 +120,97 @@ export function makeGlobeTexture() {
   })
 
   grain(ctx, 90000, 0.12)
+  return canvas.toDataURL('image/jpeg', 0.9)
+}
+
+// Ink-wash (shui-mo) variant: rice paper, land in soft layered grey washes with darker
+// ink pooling inland, and a wet brush coastline that bleeds into the paper.
+export function makeInkTexture() {
+  const canvas = document.createElement('canvas')
+  canvas.width = W
+  canvas.height = H
+  const ctx = canvas.getContext('2d')
+  const r = rand(11)
+  const land = feature(landTopo, landTopo.objects.land)
+  const geometry = land.type === 'FeatureCollection' ? land.features[0].geometry : land.geometry
+
+  // Rice paper with a few drifting bands of mist over the sea.
+  ctx.fillStyle = '#f1ede3'
+  ctx.fillRect(0, 0, W, H)
+  for (let i = 0; i < 26; i++) {
+    const cy = H * 0.15 + r() * H * 0.7
+    const g = ctx.createLinearGradient(0, cy - 60, 0, cy + 60)
+    g.addColorStop(0, 'rgba(120, 128, 130, 0)')
+    g.addColorStop(0.5, `rgba(120, 128, 130, ${0.04 + r() * 0.06})`)
+    g.addColorStop(1, 'rgba(120, 128, 130, 0)')
+    ctx.fillStyle = g
+    ctx.fillRect(r() * W - W * 0.2, cy - 60, W * (0.3 + r() * 0.5), 120)
+  }
+
+  // Pale first wash that bleeds past the coast.
+  ctx.fillStyle = 'rgba(60, 62, 60, 1)'
+  ctx.filter = 'blur(10px)'
+  for (let pass = 0; pass < 2; pass++) {
+    ctx.globalAlpha = 0.09
+    tracePolygons(ctx, geometry, (r() - 0.5) * 8, (r() - 0.5) * 8)
+    ctx.fill('evenodd')
+  }
+  ctx.filter = 'none'
+  ctx.globalAlpha = 0.1
+  tracePolygons(ctx, geometry)
+  ctx.fill('evenodd')
+  ctx.globalAlpha = 1
+
+  // Ink pooling inside the land: mottled darker blooms, clipped to the coastline.
+  ctx.save()
+  tracePolygons(ctx, geometry)
+  ctx.clip('evenodd')
+  for (let i = 0; i < 900; i++) {
+    const cx = r() * W
+    const cy = H * 0.08 + r() * H * 0.84
+    const rad = 10 + r() ** 2 * 140
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad)
+    const a = 0.03 + r() * 0.13
+    g.addColorStop(0, `rgba(25, 26, 28, ${a})`)
+    g.addColorStop(0.6, `rgba(25, 26, 28, ${a * 0.4})`)
+    g.addColorStop(1, 'rgba(25, 26, 28, 0)')
+    ctx.fillStyle = g
+    ctx.fillRect(cx - rad, cy - rad, rad * 2, rad * 2)
+  }
+  ctx.restore()
+
+  // Coastline: a wet halo, the main stroke, then a broken dry-brush pass.
+  ctx.lineJoin = 'round'
+  ctx.strokeStyle = 'rgba(20, 20, 20, 0.16)'
+  ctx.lineWidth = 6
+  ctx.filter = 'blur(3px)'
+  tracePolygons(ctx, geometry)
+  ctx.stroke()
+  ctx.filter = 'none'
+  ctx.strokeStyle = 'rgba(18, 18, 18, 0.78)'
+  ctx.lineWidth = 1.6
+  tracePolygons(ctx, geometry)
+  ctx.stroke()
+  ctx.strokeStyle = 'rgba(18, 18, 18, 0.3)'
+  ctx.lineWidth = 3
+  ctx.setLineDash([3, 9, 14, 6, 2, 11])
+  tracePolygons(ctx, geometry, 1.5, -1)
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  // Faint paper fibres.
+  ctx.strokeStyle = 'rgba(90, 80, 60, 0.07)'
+  ctx.lineWidth = 1
+  for (let i = 0; i < 2500; i++) {
+    const fx = r() * W
+    const fy = r() * H
+    const len = 8 + r() * 30
+    const ang = r() * Math.PI
+    ctx.beginPath()
+    ctx.moveTo(fx, fy)
+    ctx.quadraticCurveTo(fx + Math.cos(ang) * len * 0.5 + 4, fy + Math.sin(ang) * len * 0.5, fx + Math.cos(ang) * len, fy + Math.sin(ang) * len)
+    ctx.stroke()
+  }
+  grain(ctx, 60000, 0.08)
   return canvas.toDataURL('image/jpeg', 0.9)
 }

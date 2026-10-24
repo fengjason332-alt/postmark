@@ -33,8 +33,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .app { position: relative; height: 100%; }
-.globe { position: absolute; inset: 0; }
-.globe canvas { outline: none; }
+.globe { position: absolute; inset: 0; isolation: isolate; z-index: 0; } /* keep map labels under overlays */
+.globe canvas {
+  outline: none;
+  /* Far away the globe sits in fog; it clears as you zoom in (vars set from GlobeView). */
+  filter: blur(var(--fog-blur, 0px));
+  opacity: calc(1 - var(--fog-wash, 0) * 0.75);
+  transition: filter 0.25s linear, opacity 0.25s linear;
+}
+.globe.picking canvas { cursor: crosshair; }
 
 /* ---------- masthead ---------- */
 .masthead {
@@ -43,6 +50,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: 22px 28px 0; pointer-events: none;
 }
 .masthead > * { pointer-events: auto; }
+.controls { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.range.small button { padding: 4px 12px; font-size: 13px; }
 .brand h1 {
   margin: 0; font-family: var(--serif); font-weight: 600; font-size: 40px; letter-spacing: -0.5px; line-height: 1;
 }
@@ -222,4 +231,83 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ---------- city names (appear when zoomed in) ---------- */
+.city-label {
+  display: flex; align-items: center; gap: 4px; pointer-events: none;
+  font-family: var(--serif); font-size: 11px; letter-spacing: 0.3px; color: var(--ink-soft);
+  white-space: nowrap; transform: translateX(50%);
+  text-shadow: 0 0 3px var(--paper), 0 0 2px var(--paper);
+}
+.city-label i { width: 4px; height: 4px; border-radius: 50%; background: var(--ink-soft); flex: none; }
+.city-label.major { font-size: 13px; color: var(--ink); }
+.city-label.behind { opacity: 0; }
+
+/* ---------- home picker ---------- */
+.change-home { font-size: 13px; color: var(--vermilion); margin-left: 2px; }
+.summary { pointer-events: none; z-index: 3; }
+.summary .home-line, .home-picker { pointer-events: auto; }
+.home-picker {
+  margin-top: 12px; width: min(340px, calc(100vw - 32px)); padding: 16px 18px;
+  background: var(--page); border: 1px solid rgba(80, 60, 30, 0.18); border-radius: 6px;
+  box-shadow: 0 16px 34px -18px rgba(50, 35, 15, 0.45);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.hp-head { display: flex; justify-content: space-between; align-items: baseline; }
+.hp-head h3 { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 600; }
+.close.small { position: static; font-size: 22px; }
+.hp-label { font-size: 12px; color: var(--ink-soft); letter-spacing: 0.4px; }
+.home-picker input {
+  font: inherit; font-size: 15px; padding: 8px 10px; border-radius: 4px;
+  border: 1px solid rgba(60, 50, 40, 0.35); background: #fffdf8; color: var(--ink);
+}
+.home-picker input:focus-visible { outline: 2px solid var(--vermilion); outline-offset: 1px; }
+.hp-results { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; border-top: 1px dashed rgba(60, 50, 40, 0.25); }
+.hp-results button {
+  width: 100%; text-align: left; border: 0; background: none; padding: 7px 4px; font-size: 15px;
+  display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px dashed rgba(60, 50, 40, 0.15);
+}
+.hp-results button:hover, .hp-results button:focus-visible { background: rgba(194, 59, 34, 0.08); }
+.hp-results span { color: var(--ink-soft); font-size: 13px; }
+.hp-globe { border: 1.5px dashed var(--ink-soft); background: none; border-radius: 4px; padding: 8px; font-size: 14px; }
+.hp-globe.on { border-color: var(--vermilion); color: var(--vermilion); }
+.hp-reset { align-self: flex-start; font-size: 13px; color: var(--ink); }
+.hp-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-soft); }
+
+/* ---------- ink-wash style ---------- */
+:root[data-style='ink'] {
+  --paper: #f1ede3;
+  --ink: #1b1b1a;
+  --ink-soft: #5d5a54;
+  --vermilion: #b8321f;
+  --page: #f6f2e8;
+  --serif: 'Cormorant Garamond', 'Noto Serif SC', Georgia, serif;
+  --hand: 'Nanum Brush Script', 'Caveat', cursive;
+}
+:root[data-style='ink'] body {
+  background-image:
+    radial-gradient(ellipse at 50% 42%, rgba(250, 248, 242, 0.95), rgba(236, 231, 220, 0.7) 65%, rgba(205, 200, 188, 0.8)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.6' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.3 0 0 0 0 0.3 0 0 0 0 0.28 0 0 0 0.07 0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root[data-style='ink'] .brand h1 { font-weight: 700; font-size: 46px; letter-spacing: 0; }
+:root[data-style='ink'] .tagline { font-size: 24px; }
+:root[data-style='ink'] .sentence { font-size: 21px; }
+:root[data-style='ink'] .range { background: rgba(246, 242, 232, 0.75); }
+:root[data-style='ink'] .tick span { font-size: 22px; border-bottom-width: 1px; }
+:root[data-style='ink'] .cover, :root[data-style='ink'] .page { background-color: var(--page); background-image: none; }
+:root[data-style='ink'] .book { box-shadow: 0 30px 60px -24px rgba(20, 20, 20, 0.45), 0 0 0 1px rgba(20, 20, 20, 0.12); }
+:root[data-style='ink'] .book::after { background: linear-gradient(90deg, transparent, rgba(20, 20, 20, 0.08) 50%, transparent); }
+/* Photos are mounted like a scroll painting instead of taped. */
+:root[data-style='ink'] .taped { padding: 10px 10px 18px; background: #fbf9f3; box-shadow: 0 0 0 1px rgba(30, 30, 30, 0.15), 0 10px 18px -12px rgba(20, 20, 20, 0.4); }
+:root[data-style='ink'] .taped::before { display: none; }
+:root[data-style='ink'] .taped img { filter: saturate(0.75) contrast(1.02); }
+:root[data-style='ink'] .day-no, :root[data-style='ink'] .kicker { color: var(--ink); }
+:root[data-style='ink'] .route .hand { color: var(--vermilion); }
+:root[data-style='ink'] .city-label { font-style: italic; font-size: 12px; }
+:root[data-style='ink'] .city-label.major { font-size: 14px; }
+
+@media (max-width: 720px) {
+  .controls { gap: 6px; }
+  .home-picker { position: fixed; left: 16px; right: 16px; top: 120px; width: auto; z-index: 5; }
 }
