@@ -39,6 +39,14 @@ Pipeline counts for this run: 277 photos in, 258 after cleaning, 225 with GPS.
 - Still missed: one trip with no detection, and one long trip found only for its first week.
 - Direction: user-set "home circle" slider (5 radii) replaces the trip-score idea for now.
 
+### Radius chart and GPS filling (P1, started early)
+
+- Radius vs F1 chart: `results/radius_vs_f1.png` (script `notebooks/radius_chart.py`). Flat at F1 0.57 for every radius; one person's data cannot pick a default.
+- `backend/fill_gps.py` fills missing GPS from photos taken close in time, and refuses when the neighbours are far apart (the person was moving).
+- Hold-out test (hide GPS on 45 photos that have it, re-fill, compare): 91% filled, median error 0.002 km, 90th percentile 0.04 km (`results/fill_gps_eval.csv`).
+- On the real GPS-less photos it filled only 2 of 33: they have no GPS photo within an hour. Accurate, but small gain.
+- Backend now has `geocode.py` (city names). Still missing for real data on the globe: `build_json.py`.
+
 ### Next
 - Jason: count one-day trips; make the distance radius configurable instead of a fixed 100 km.
 - DS: re-run validation after his push; compare several radius values.

@@ -5,12 +5,20 @@ import Globe from 'react-globe.gl'
 import { MeshPhongMaterial } from 'three'
 import globeTexture from './assets/globe-gouache.webp' // painted by globeTexture.js, baked so it loads instantly
 import { homeSeal, postmark } from './stamps.js'
+import { createSparkles } from './sparkles.js'
 import { BORDER_COLOR, citiesOf, DRAW_MS, distanceKm, STAY, tripColor } from './data.js'
 import { angularDistance, createBorderLayers, loadCities, visibleCities } from './geoLayers.js'
 
 const FADED = 0.16 // how bright a leg stays once the route has moved on
 const REST = 0.55 // brightness of every route once all legs have flown
-const IDLE_MS = 6000 // untouched this long (and zoomed out), the globe starts its slow spin
+// Route line styles; ?line=pencil or ?line=stitch in the URL tries the others.
+const LINES = {
+  ink: { stroke: 0.2, dash: 1, gap: 0 }, // thin solid ink
+  pencil: { stroke: 0.2, dash: 0.022, gap: 0.014 }, // short pencil dashes
+  stitch: { stroke: 0.36, dash: 0.005, gap: 0.016 }, // dotted, like a stitched route
+}
+const line = LINES[new URLSearchParams(window.location.search).get('line')] ?? LINES.ink
+const IDLE_MS = 2500 // untouched this long (and zoomed out), the globe starts its slow spin
 const isPhone = () => window.innerWidth < 720
 const hexAlpha = (hex, a) => hex + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, '0')
 
@@ -31,6 +39,8 @@ const GlobeView = forwardRef(function GlobeView(
   const globe = useRef()
   const wrap = useRef()
   const overlay = useRef()
+  const dust = useRef() // canvas for the pigment flecks around the rim
+  const sparkles = useRef(null)
   const borders = useRef(null)
   const [size, setSize] = useState({ width: window.innerWidth, height: window.innerHeight })
   const [tick, setTick] = useState(0) // bumps each animation frame while lines draw or fade
@@ -74,7 +84,7 @@ const GlobeView = forwardRef(function GlobeView(
   // for a few seconds. Any press, drag, zoom or hovering a pin stops it at once, so pins hold
   // still when you go to click them. App can switch it off entirely (e.g. while a page is open).
   const spin = useRef({ allowed: true, hover: false, last: 0, replay: false })
-  spin.current.replay = cursor !== null
+  spin.current.replay = follow // only while the replay is actually playing, not when paused on the bar
   function touch() {
     spin.current.last = performance.now()
     const controls = globe.current?.controls()
@@ -91,7 +101,10 @@ const GlobeView = forwardRef(function GlobeView(
       const s = spin.current
       if (s.hover && !overlay.current?.querySelector('.pin:hover')) s.hover = false // pin went away under the pointer
       const idle = performance.now() - s.last > IDLE_MS
-      g.controls().autoRotate = s.allowed && !s.hover && !s.replay && idle && g.pointOfView().altitude > 1.7
+      const controls = g.controls()
+      const altitude = g.pointOfView().altitude
+      controls.autoRotate = s.allowed && !s.hover && !s.replay && idle
+      controls.autoRotateSpeed = 0.35 * Math.max(0.2, Math.min(1, altitude / 2.3)) // gentler when close
     }, 300)
     return () => clearInterval(id)
   }, [])
@@ -104,6 +117,55 @@ const GlobeView = forwardRef(function GlobeView(
   }, [])
 
   useEffect(() => () => borders.current?.dispose(), [])
+
+  // Touching the globe with the pointer: the globe leans in a touch and a few pigment flecks
+  // puff off the rim where the pointer came in. Mouse/trackpad only (no hover on phones).
+  useEffect(() => {
+    const el = wrap.current
+    const sp = (sparkles.current = createSparkles(dust.current))
+    if (!window.matchMedia?.('(hover: hover)').matches) return () => sp.dispose()
+    let over = false
+    const move = (e) => {
+      const g = globe.current
+      if (!g || !borders.current) return
+      const rect = el.getBoundingClientRect()
+      const k = rect.width / el.clientWidth // the wrapper may be scaled up while hovered
+      const x = (e.clientX - rect.left) / k
+      const y = (e.clientY - rect.top) / k
+      const on = !!g.toGlobeCoords(x, y)
+      if (on === over) return
+      over = on
+      el.classList.toggle('touched', on)
+      if (on) {
+        sp.setRim(rimOnScreen())
+        sp.enter(x, y)
+      } else sp.leave()
+    }
+    const out = () => {
+      over = false
+      el.classList.remove('touched')
+      sp.leave()
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerleave', out)
+    return () => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerleave', out)
+      sp.dispose()
+    }
+  }, [])
+
+  useEffect(() => sparkles.current?.resize(), [size])
+
+  // Where the globe's outline sits on screen (it is always centred in the view).
+  function rimOnScreen() {
+    const g = globe.current
+    const cam = g.camera()
+    const R = g.getGlobeRadius()
+    const d = cam.position.length()
+    const r = (R / Math.sqrt(Math.max(1e-6, d * d - R * R)) / Math.tan((cam.fov * Math.PI) / 360)) * (wrap.current.clientHeight / 2)
+    return { x: wrap.current.clientWidth / 2, y: wrap.current.clientHeight / 2, r }
+  }
 
 
   function onReady() {
@@ -133,6 +195,7 @@ const GlobeView = forwardRef(function GlobeView(
   function onView(pov) {
     applyFog(wrap.current, pov.altitude)
     borders.current?.setAltitude(pov.altitude)
+    if (globe.current) sparkles.current?.setRim(rimOnScreen())
     layoutPins()
     if (!cities.current) return
     const last = lastLabelPov.current
@@ -343,11 +406,14 @@ const GlobeView = forwardRef(function GlobeView(
     }
     // A crowd of stamps becomes one numbered bubble in the middle of its dots; every dot
     // stays on its exact spot, and clicking the bubble zooms in until they separate.
+    for (const p of sorted) if (p.kind === 'stamp') p.el.classList.remove('clustered')
     for (const p of sorted) {
       if (p.kind !== 'stamp') continue
       const group = [p.el, ...p.el._members.map((c) => stampCache.current.get(c.id)?.el).filter(Boolean)]
       const n = group.length
       p.el.classList.toggle('has-more', n > 1)
+      // Dots tucked under the bubble step back, so the bubble is the only thing to click.
+      for (const el of group.slice(1)) el.classList.add('clustered')
       if (n < 2) continue
       const cx = group.reduce((t, el) => t + el._xy.x, 0) / n - p.el._xy.x
       const cy = group.reduce((t, el) => t + el._xy.y, 0) / n - p.el._xy.y
@@ -407,15 +473,16 @@ const GlobeView = forwardRef(function GlobeView(
         arcEndLat={(d) => d.to.lat}
         arcEndLng={(d) => d.to.lng}
         arcColor={arcColor}
-        arcStroke={0.55}
+        arcStroke={line.stroke}
         arcAltitudeAutoScale={0.32}
-        arcDashLength={1}
-        arcDashGap={2}
+        arcDashLength={replay ? 1 : line.dash}
+        arcDashGap={replay ? 2 : line.gap}
         arcDashInitialGap={dashGap}
         arcsTransitionDuration={0}
         arcLabel={(d) => `${d.trip.title} · ${d.trip.start_date}`}
         onArcClick={(d) => onTripClick(d.trip)}
       />
+      <canvas className="sparkles" ref={dust} />
       <div className="pins" ref={overlay} />
     </div>
   )
