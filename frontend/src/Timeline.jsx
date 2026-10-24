@@ -26,7 +26,7 @@ export default function Timeline({ trips, story, cursor, selectedId, onCursor, o
 
   return (
     <div className="timeline">
-      <button className="play" onClick={() => setPlaying((p) => !p)} aria-label={playing ? 'Pause' : 'Replay from the start'}>
+      <button className="play" onClick={() => setPlaying((p) => !p)} aria-label={playing ? 'Pause' : cursor === null ? 'Replay from the start' : 'Resume'}>
         {playing ? '❚❚' : '▶'}
       </button>
       <div className="track">
@@ -65,17 +65,22 @@ export default function Timeline({ trips, story, cursor, selectedId, onCursor, o
         </div>
       </div>
       <button className="replay-close" onClick={onClose} aria-label="Close replay">×</button>
-      <Player playing={playing} max={max} onCursor={onCursor} onDone={() => setPlaying(false)} timer={timer} />
+      <Player playing={playing} max={max} cursor={cursor} onCursor={onCursor} onDone={() => setPlaying(false)} timer={timer} />
     </div>
   )
 }
 
 // Runs the replay: the knob moves at one even speed, one leg's stretch per DRAW_MS, updated
 // every frame. The globe reads the same position, so bar and lines can't drift apart.
-function Player({ playing, max, onCursor, onDone, timer }) {
+function Player({ playing, max, cursor, onCursor, onDone, timer }) {
+  const latest = useRef(cursor)
+  latest.current = cursor
   useEffect(() => {
     if (!playing) return
-    const start = performance.now()
+    // Resume from where it was paused (or dragged to); from the start when it had finished.
+    const at = latest.current
+    const from = at !== null && at > 0 && at < max ? at : 0
+    const start = performance.now() - from * DRAW_MS
     const step = (now) => {
       const pos = (now - start) / DRAW_MS
       if (pos >= max) {
@@ -86,7 +91,7 @@ function Player({ playing, max, onCursor, onDone, timer }) {
       onCursor(pos)
       timer.current = requestAnimationFrame(step)
     }
-    onCursor(0)
+    onCursor(from)
     timer.current = requestAnimationFrame(step)
     return () => cancelAnimationFrame(timer.current)
   }, [playing]) // eslint-disable-line react-hooks/exhaustive-deps
