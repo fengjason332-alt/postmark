@@ -57,6 +57,11 @@ export default function App() {
 
   const story = useMemo(() => storyline(inRange), [inRange])
 
+  // The globe may idle-spin only while nothing is open on top of it and no home is being picked.
+  useEffect(() => {
+    globe.current?.setRotating(!trip && !city && !picking)
+  }, [trip, city, picking])
+
   function openTrip(t) {
     setCity(null)
     globe.current?.flyTo(t)
@@ -64,14 +69,12 @@ export default function App() {
   }
 
   function openCity(c) {
-    globe.current?.setRotating(false)
     setCity(c)
   }
 
   function closeOverlay() {
     setTrip(null)
     setCity(null)
-    globe.current?.setRotating(true)
   }
 
   function chooseHome(c) {
@@ -80,7 +83,6 @@ export default function App() {
     store(HOME_KEY, h)
     setPicking(false)
     setHomeOpen(false)
-    globe.current?.setRotating(true)
     globe.current?.lookAt(h, 2)
   }
 
@@ -94,7 +96,6 @@ export default function App() {
     store(HOME_KEY, null)
     setHomeOpen(false)
     setPicking(false)
-    globe.current?.setRotating(true)
     globe.current?.lookAt(data.trips.home, 2)
   }
 
@@ -146,7 +147,7 @@ export default function App() {
             home={home}
             detected={data.trips.home}
             picking={picking}
-            onPickOnGlobe={() => { setPicking((p) => !p); globe.current?.setRotating(false) }}
+            onPickOnGlobe={() => setPicking((p) => !p)}
             onChoose={chooseHome}
             onReset={resetHome}
             onClose={() => { setHomeOpen(false); setPicking(false) }}

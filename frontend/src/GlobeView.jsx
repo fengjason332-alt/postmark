@@ -11,6 +11,13 @@ import { angularDistance, createBorderLayers, loadCities, visibleCities } from '
 
 const FADED = 0.16 // how bright a leg stays once the route has moved on
 const REST = 0.55 // brightness of every route once all legs have flown
+// Route line styles; ?line=pencil or ?line=stitch in the URL tries the others.
+const LINES = {
+  ink: { stroke: 0.2, dash: 1, gap: 0 }, // thin solid ink
+  pencil: { stroke: 0.2, dash: 0.022, gap: 0.014 }, // short pencil dashes
+  stitch: { stroke: 0.36, dash: 0.005, gap: 0.016 }, // dotted, like a stitched route
+}
+const line = LINES[new URLSearchParams(window.location.search).get('line')] ?? LINES.ink
 const IDLE_MS = 2500 // untouched this long (and zoomed out), the globe starts its slow spin
 const isPhone = () => window.innerWidth < 720
 const hexAlpha = (hex, a) => hex + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, '0')
@@ -77,7 +84,7 @@ const GlobeView = forwardRef(function GlobeView(
   // for a few seconds. Any press, drag, zoom or hovering a pin stops it at once, so pins hold
   // still when you go to click them. App can switch it off entirely (e.g. while a page is open).
   const spin = useRef({ allowed: true, hover: false, last: 0, replay: false })
-  spin.current.replay = cursor !== null
+  spin.current.replay = follow // only while the replay is actually playing, not when paused on the bar
   function touch() {
     spin.current.last = performance.now()
     const controls = globe.current?.controls()
@@ -94,7 +101,10 @@ const GlobeView = forwardRef(function GlobeView(
       const s = spin.current
       if (s.hover && !overlay.current?.querySelector('.pin:hover')) s.hover = false // pin went away under the pointer
       const idle = performance.now() - s.last > IDLE_MS
-      g.controls().autoRotate = s.allowed && !s.hover && !s.replay && idle && g.pointOfView().altitude > 1.7
+      const controls = g.controls()
+      const altitude = g.pointOfView().altitude
+      controls.autoRotate = s.allowed && !s.hover && !s.replay && idle
+      controls.autoRotateSpeed = 0.35 * Math.max(0.2, Math.min(1, altitude / 2.3)) // gentler when close
     }, 300)
     return () => clearInterval(id)
   }, [])
@@ -463,10 +473,10 @@ const GlobeView = forwardRef(function GlobeView(
         arcEndLat={(d) => d.to.lat}
         arcEndLng={(d) => d.to.lng}
         arcColor={arcColor}
-        arcStroke={0.55}
+        arcStroke={line.stroke}
         arcAltitudeAutoScale={0.32}
-        arcDashLength={1}
-        arcDashGap={2}
+        arcDashLength={replay ? 1 : line.dash}
+        arcDashGap={replay ? 2 : line.gap}
         arcDashInitialGap={dashGap}
         arcsTransitionDuration={0}
         arcLabel={(d) => `${d.trip.title} · ${d.trip.start_date}`}
