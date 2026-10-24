@@ -1,0 +1,11 @@
+data/
+*.heic
+*.HEIC
+*.mov
+*.MOV
+*.pdf
+.DS_Store
+.env
+node_modules/
+__pycache__/
+.venv/
