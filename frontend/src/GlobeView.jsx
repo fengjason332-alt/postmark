@@ -69,8 +69,8 @@ const GlobeView = forwardRef(function GlobeView(
     setRotating(false)
     const km = distanceKm(a.from, a.to)
     const altitude = Math.min(2.2, Math.max(0.55, 0.45 + km / 2500))
-    const lng = a.to.lng + (((a.from.lng - a.to.lng + 540) % 360) - 180) * 0.6
-    g.pointOfView({ lat: a.to.lat + (a.from.lat - a.to.lat) * 0.6, lng, altitude }, DRAW_MS)
+    const lng = a.from.lng + (((a.to.lng - a.from.lng + 540) % 360) - 180) * 0.6
+    g.pointOfView({ lat: a.from.lat + (a.to.lat - a.from.lat) * 0.6, lng, altitude }, DRAW_MS)
   }
 
   function setRotating(on) {
@@ -138,8 +138,8 @@ const GlobeView = forwardRef(function GlobeView(
         const key = `${homeKey}:${trip.id}:${i}`
         next.set(key, arcCache.current.get(key) ?? {
           key, trip, leg: i, homeward: i === stops.length - 2,
-          // Dashes grow from the arc's end, so start/end are swapped to write outward from home.
-          from: stops[i + 1], to: stops[i],
+          // three-globe reveals a dash from the arc's start, so each leg grows from where it leaves.
+          from: stops[i], to: stops[i + 1],
           born: now + delay + i * (DRAW_MS + PAUSE_MS), gap: 1,
         })
       }
@@ -177,8 +177,9 @@ const GlobeView = forwardRef(function GlobeView(
           handlers.current.onCityClick(el._city)
         })
         el.appendChild(button)
-        const arc = arcs.find((a) => a.trip.id === first.id && a.from.id === city.id)
-        button.style.animationDelay = `${arc ? Math.max(0, arc.born - now + DRAW_MS * 0.9) : 0}ms`
+        // The dot, stamp and stop number all land when the first line reaching the city arrives.
+        const arc = arcs.find((a) => a.trip.id === first.id && a.to.id === city.id)
+        el.style.setProperty('--land', `${arc ? Math.max(0, arc.born - now + DRAW_MS * 0.9) : 0}ms`)
         d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7 }
       }
       d.el._city = city
