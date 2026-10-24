@@ -11,8 +11,10 @@ Algorithm (defaults in DEFAULT_PARAMS, see AGENTS.md section 7):
   2. Home: night photos (local hour >= 22 or < 6) are clustered with DBSCAN (haversine);
      the biggest cluster's centroid is home. Recomputed per calendar quarter ("quarterly")
      or computed once ("fixed").
-  3. Day classes: home (any photo within home_radius_km), away (any photo > trip_min_km),
-     otherwise neutral.
+  3. Day classes, per local date from its GPS photos only: away (at least one photo
+     > trip_min_km from home, even if the date also has photos near home), home (ALL GPS
+     photos within home_radius_km), otherwise neutral (e.g. only 25-100 km photos, a mix of
+     near-home and 25-100 km photos, or no GPS photos).
   4. Trips: runs of away days; short neutral gaps without a home day are bridged.
 If data/ground_truth.csv exists, each ground-truth trip is compared with the best
 overlapping predicted trip (Jaccard day overlap). Precision / recall / F1 are NOT computed
@@ -240,21 +242,29 @@ def detect_homes(prepared, params):
 
 
 def classify_days(prepared, homes, params):
-    """Return ([(day, class)] for every calendar day spanned, GPS rows with dist_km)."""
+    """Return ([(day, class)] for every calendar day spanned, GPS rows with dist_km).
+
+    Per date, using GPS photos only and each photo's distance to that date's home:
+    away if any photo is > trip_min_km; home if all photos are <= home_radius_km;
+    otherwise neutral (including dates without GPS photos).
+    """
     gps = prepared[prepared["has_gps"]].copy()
     home_points = [homes[quarter_of(d)] for d in gps["day"]]
     gps["dist_km"] = haversine_km(gps["lat"].to_numpy(), gps["lng"].to_numpy(),
                                   [h[0] for h in home_points], [h[1] for h in home_points])
-    near_days = set(gps.loc[gps["dist_km"] <= params["home_radius_km"], "day"])
+    # A date is away if ANY GPS photo is far (a travel day often starts or ends with photos
+    # near home); it is a home day only if ALL its GPS photos are near home.
     far_days = set(gps.loc[gps["dist_km"] > params["trip_min_km"], "day"])
+    near_only_days = set(gps.groupby("day")["dist_km"].max()
+                         .loc[lambda dist: dist <= params["home_radius_km"]].index)
     first_day, last_day = min(prepared["day"]), max(prepared["day"])
     classes = []
     for offset in range((last_day - first_day).days + 1):
         day = first_day + timedelta(days=offset)
-        if day in near_days:
-            classes.append((day, DAY_HOME))
-        elif day in far_days:
+        if day in far_days:
             classes.append((day, DAY_AWAY))
+        elif day in near_only_days:
+            classes.append((day, DAY_HOME))
         else:
             classes.append((day, DAY_NEUTRAL))
     return classes, gps

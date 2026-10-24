@@ -11,7 +11,7 @@ import io
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -326,6 +326,71 @@ class TestTrips(unittest.TestCase):
                                         ("2026-01-23", "2026-01-24")])
         self.assertEqual(list(trips["trip_id"]), ["trip_20260120", "trip_20260123"])
 
+    def test_mixed_first_and_last_days_are_full_travel_days(self):
+        p = with_home()
+        p.add("2026-01-20", 8, HOME)       # morning at home, then the trip starts
+        p.visit("2026-01-20", NYC)
+        p.visit("2026-01-21", NYC)
+        p.visit("2026-01-22", NYC)
+        p.visit("2026-01-23", NYC)
+        p.add("2026-01-23", 20, HOME)      # evening back home
+        trips, _, photo_trips = segment.detect_trips(p.frame())
+        self.assertEqual(trips.to_dict("records"), [{
+            "person": "tester", "trip_id": "trip_20260120", "start_date": "2026-01-20",
+            "end_date": "2026-01-23", "days": 4, "max_distance_km": 306, "photo_count": 10,
+            "n_stays": 6, "cities": ""}])
+        self.assertEqual(len(photo_trips), 10)  # includes the 2 home-area photos
+
+    def test_home_only_day_in_the_middle_still_ends_trip(self):
+        p = with_home()
+        p.visit("2026-01-20", NYC)
+        p.visit("2026-01-21", NYC)
+        p.add("2026-01-22", 9, HOME)       # every photo of the date is within 25 km
+        p.add("2026-01-22", 12, CAMBRIDGE)
+        p.visit("2026-01-23", NYC)
+        p.visit("2026-01-24", NYC)
+        trips = segment.detect_trips(p.frame())[0]
+        self.assertEqual(spans(trips), [("2026-01-20", "2026-01-21"),
+                                        ("2026-01-23", "2026-01-24")])
+        self.assertEqual(list(trips["photo_count"]), [4, 4])
+
+    def test_home_only_day_drops_parts_shorter_than_min_days(self):
+        p = with_home()
+        p.visit("2026-01-20", NYC)
+        p.visit("2026-01-21", NYC)
+        p.add("2026-01-22", 9, HOME)
+        p.add("2026-01-22", 12, CAMBRIDGE)
+        p.visit("2026-01-23", NYC)
+        trips = segment.detect_trips(p.frame())[0]
+        self.assertEqual(spans(trips), [("2026-01-20", "2026-01-21")])
+        trips = segment.detect_trips(p.frame(), {"min_days": 1})[0]
+        self.assertEqual(spans(trips), [("2026-01-20", "2026-01-21"),
+                                        ("2026-01-23", "2026-01-23")])
+
+    def test_near_home_plus_mid_distance_day_is_bridged(self):
+        p = with_home()
+        p.visit("2026-01-20", NYC)
+        p.add("2026-01-21", 9, HOME)       # near home plus a 25-100 km photo: neutral
+        p.add("2026-01-21", 12, PVD)
+        p.visit("2026-01-22", NYC)
+        trips = segment.detect_trips(p.frame())[0]
+        self.assertEqual(spans(trips), [("2026-01-20", "2026-01-22")])
+        self.assertEqual(list(trips["days"]), [3])
+        self.assertEqual(list(trips["photo_count"]), [6])
+
+    def test_mixed_neutral_days_count_toward_max_gap_days(self):
+        p = with_home()
+        p.visit("2026-01-20", NYC)
+        for day in ["2026-01-21", "2026-01-22", "2026-01-23"]:
+            p.add(day, 9, HOME)
+            p.add(day, 12, PVD)
+        p.visit("2026-01-24", NYC)
+        trips = segment.detect_trips(p.frame(), {"min_days": 1})[0]
+        self.assertEqual(spans(trips), [("2026-01-20", "2026-01-20"),
+                                        ("2026-01-24", "2026-01-24")])
+        trips = segment.detect_trips(p.frame(), {"min_days": 1, "max_gap_days": 3})[0]
+        self.assertEqual(spans(trips), [("2026-01-20", "2026-01-24")])
+
     def test_mid_distance_day_bridged_but_never_an_endpoint(self):
         p = with_home()
         p.visit("2026-01-19", PVD)
@@ -366,6 +431,34 @@ class TestTrips(unittest.TestCase):
         self.assertEqual(list(photo_trips.columns), ["photo_id", "trip_id"])
         self.assertEqual(len(photo_trips), 0)
         self.assertEqual(len(stays), 12)
+
+
+class TestDayClasses(unittest.TestCase):
+    def classes(self, photos, **params):
+        params = segment.resolve_params(params)
+        prepared = segment.prepare_photos(photos.frame())
+        homes, _ = segment.detect_homes(prepared, params)
+        classes, _ = segment.classify_days(prepared, homes, params)
+        return dict(classes)
+
+    def test_each_day_class(self):
+        p = with_home()
+        p.add("2026-01-20", 8, HOME)       # far photo makes the whole date away
+        p.add("2026-01-20", 12, NYC)
+        p.add("2026-01-21", 9, HOME)       # all photos within home_radius_km: home
+        p.add("2026-01-21", 10, CAMBRIDGE)
+        p.add("2026-01-22", 12, PVD)       # only a 25-100 km photo: neutral
+        p.add("2026-01-23", 9, HOME)       # near-home plus a 25-100 km photo: neutral
+        p.add("2026-01-23", 12, PVD)
+        p.add("2026-01-24", 12)            # no GPS photo: neutral
+        p.add("2026-01-25", 12, PVD)       # 25-100 km photo plus a far photo: away
+        p.add("2026-01-25", 13, MTL)
+        classes = self.classes(p)
+        self.assertEqual(
+            [classes[date.fromisoformat(f"2026-01-{d}")] for d in range(20, 26)],
+            [segment.DAY_AWAY, segment.DAY_HOME, segment.DAY_NEUTRAL, segment.DAY_NEUTRAL,
+             segment.DAY_NEUTRAL, segment.DAY_AWAY])
+        self.assertEqual(classes[date(2026, 1, 1)], segment.DAY_HOME)
 
 
 class TestParams(unittest.TestCase):
