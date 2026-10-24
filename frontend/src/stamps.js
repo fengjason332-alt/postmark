@@ -108,6 +108,11 @@ function deepen(hex, f = 0.72) {
 }
 
 const hash = (s) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7)
+// "San Francisco" -> "SF", "Lisbon" -> "L"; '' when the name has no Latin letters.
+function monogram(name) {
+  const words = name.normalize('NFD').replace(/[^A-Za-z\s-]/g, '').split(/[\s-]+/).filter((w) => w && !/^(of|de|la|le|du|del|da)$/i.test(w))
+  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('')
+}
 const key = (name) => name.toLowerCase().normalize('NFD').replace(/[^a-z]/g, '')
 
 // Badge outlines in a 100×100 box.
@@ -138,7 +143,10 @@ export function postmark(city, tripColor) {
   const color = deepen(tripColor)
   const k = ALIASES[key(city.name)] ?? key(city.name)
   const h = hash(k)
-  const art = LANDMARKS[k] ?? MOTIFS[h % MOTIFS.length]
+  // A drawn landmark when we have one; otherwise the city's initials as a foil monogram,
+  // and a small motif only for names with no Latin letters to make initials from.
+  const mark = monogram(city.name)
+  const art = LANDMARKS[k] ?? (mark ? null : MOTIFS[h % MOTIFS.length])
   const shape = badge(Math.floor(h / 7) % 4)
   const id = `arc-${h.toString(36)}`
   const name = city.name.toUpperCase()
@@ -146,7 +154,11 @@ export function postmark(city, tripColor) {
   const spacing = name.length > 9 ? 0.6 : 1.4
   const fit = name.length > 17 ? ' textLength="100" lengthAdjust="spacingAndGlyphs"' : '' // very long names are squeezed onto the arc
   const year = city.visits[0].arrive.slice(0, 4)
-  const icon = art.replace(/ L\/>/g, ` fill="${color}"/>`) // cut-outs show the leather through the foil
+  const center = art
+    ? `<g fill="${FOIL}" transform="translate(30.5 30) scale(0.975)">${art.replace(/ L\/>/g, ` fill="${color}"/>`)}</g>` // cut-outs show the leather through the foil
+    : `<text x="50" y="${mark.length > 1 ? 60 : 62}" text-anchor="middle" font-family="'Cormorant Garamond', Georgia, serif" font-style="italic" font-weight="700"
+        font-size="${mark.length > 1 ? 27 : 33}" letter-spacing="${mark.length > 1 ? -1 : 0}" fill="${FOIL}">${esc(mark)}</text>
+      <path d="M33 66.5h12M55 66.5h12" stroke="${FOIL}" stroke-width="0.7"/><path d="M50 64.5l2 2-2 2-2-2z" fill="${FOIL}"/>`
   // Repeat visits: more badges stacked underneath, slightly turned.
   const under = city.visits.slice(1, 3)
     .map((_, i) => `<g transform="translate(${5 + i * 4} ${6 + i * 4}) rotate(${8 + i * 6} 50 50)" fill="${color}" opacity="${0.55 - i * 0.15}">${shape}</g>`)
@@ -165,7 +177,7 @@ export function postmark(city, tripColor) {
       <text font-family="'Cormorant Garamond', Georgia, serif" font-weight="700" font-size="${size}" letter-spacing="${spacing}" fill="${FOIL}">
         <textPath href="#${id}" startOffset="50%" text-anchor="middle"${fit}>${esc(name)}</textPath>
       </text>
-      <g fill="${FOIL}" transform="translate(30.5 30) scale(0.975)">${icon}</g>
+      ${center}
       <text x="50" y="80" text-anchor="middle" font-family="'Cormorant Garamond', Georgia, serif" font-weight="700"
         font-size="7.5" letter-spacing="2" fill="${FOIL}">${esc(city.country_code ?? '')} · ${year}</text>
     </g>
