@@ -85,7 +85,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ---------- pins on the globe (positioned by GlobeView) ---------- */
 .pins { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-.pin { position: absolute; left: 0; top: 0; width: 0; height: 0; transition: opacity 0.3s; will-change: transform; }
+.pin { position: absolute; left: 0; top: 0; width: 0; height: 0; transition: opacity 0.3s; }
 .pin.behind { opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0s 0.3s; }
 .pin-dot {
   position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%;
@@ -96,7 +96,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   position: absolute; left: 0; bottom: 8px; transform: translateX(-50%); transform-origin: 50% 100%;
   pointer-events: auto; transition: transform 0.25s, opacity 0.25s;
 }
-.stamp .postmark { transform: translateX(-50%) scale(var(--zs, 1)); }
+/* Zoom resizes the stamp itself rather than scaling it, so the browser always draws it
+   at full resolution (a scaled layer can stay stuck at a blurry low-res copy). */
+.stamp .postmark {
+  width: calc(var(--size) * var(--zs, 1)); height: calc(var(--size) * var(--zs, 1));
+  transition: width 0.25s, height 0.25s, transform 0.25s, opacity 0.25s;
+}
 .stamp.mini .postmark { transform: translateX(-50%) scale(0.2); opacity: 0; pointer-events: none; }
 /* Name tag: what a stamp becomes when there's no room for the whole stamp. It sits on
    whichever side of the dot has room (set by GlobeView as data-side). */
