@@ -110,9 +110,45 @@ export function withHome(trips, home) {
 
 export const thisYear = () => String(new Date().getFullYear())
 
-export function filterTrips(trips, range) {
-  if (range === 'all') return trips
-  return trips.filter((t) => t.start_date.startsWith(range) || t.end_date.startsWith(range))
+// Every calendar year that some trip touches, newest first (a trip over New Year counts for both).
+export function tripYears(tripLists) {
+  const years = new Set()
+  for (const list of tripLists) {
+    for (const t of list ?? []) {
+      for (let y = +t.start_date.slice(0, 4); y <= +t.end_date.slice(0, 4); y++) years.add(String(y))
+    }
+  }
+  return [...years].sort((a, b) => b - a)
+}
+
+// Trips that overlap the year ('all' keeps every trip).
+export function inYear(trips, year) {
+  if (year === 'all') return trips
+  return trips.filter((t) => t.start_date <= `${year}-12-31` && t.end_date >= `${year}-01-01`)
+}
+
+// The homes entry (AGENTS.md §6) that covers most of the year (the later one on a tie);
+// null for 'all' or a year no entry touches.
+export function homeForYear(homes, year) {
+  if (year === 'all' || !homes?.length) return null
+  const first = dayNumber(`${year}-01-01`)
+  const last = dayNumber(`${year}-12-31`)
+  let best = null
+  let bestDays = 0
+  for (const h of homes) {
+    const days = Math.min(last, dayNumber(h.to_date)) - Math.max(first, dayNumber(h.from_date)) + 1
+    if (days > 0 && days >= bestDays) {
+      best = h
+      bestDays = days
+    }
+  }
+  return best
+}
+
+// A stats.json entry in the shape summarize() returns; null if it lacks a number.
+export function fromStatsFile(s) {
+  const out = { trips: s?.trips, days: s?.days_away, km: s?.distance_km, cities: s?.cities, countries: s?.countries }
+  return Object.values(out).every((n) => typeof n === 'number') ? out : null
 }
 
 // Every city on the globe, merged across trips so repeat visits stack on one postmark.
@@ -149,10 +185,15 @@ const fmt = (n) => n.toLocaleString('en-US')
 
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`
 
-// The journal-style sentence under the title, e.g. "This year you spent 47 days away and wandered through 6 cities."
-export function sentence(range, s) {
-  if (s.trips === 0) return range === 'all' ? 'No trips found yet.' : 'No trips yet this year. The globe is waiting.'
-  const who = range === 'all' ? 'Over the years you' : 'This year you'
+// The journal-style sentence under the title, e.g. "In 2025 you spent 47 days away and wandered through 6 cities."
+// `year` is 'all' or a year such as '2025'.
+export function sentence(year, s) {
+  const current = year === thisYear()
+  if (s.trips === 0) {
+    if (year === 'all') return 'No trips found yet.'
+    return current ? 'No trips yet this year. The globe is waiting.' : `No trips found in ${year}.`
+  }
+  const who = year === 'all' ? 'Over the years you' : current ? 'This year you' : `In ${year} you`
   const countries = s.countries > 1 ? ` in ${count(s.countries, 'country', 'countries')}` : ''
   return `${who} spent ${count(s.days, 'day', 'days')} away from home, wandered through ${count(s.cities, 'city', 'cities')}${countries}, and covered about ${fmt(s.km)} km.`
 }

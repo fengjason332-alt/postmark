@@ -7,19 +7,27 @@ import globeTexture from './assets/globe-gouache.webp' // painted by globeTextur
 import { homeSeal, postmark } from './stamps.js'
 import { createSparkles } from './sparkles.js'
 import { BORDER_COLOR, citiesOf, DRAW_MS, distanceKm, STAY, tripColor } from './data.js'
-import { angularDistance, createBorderLayers, loadCities, visibleCities } from './geoLayers.js'
+import { angularDistance, createBorderLayers, createHomeRing, loadCities, visibleCities } from './geoLayers.js'
 
 const FADED = 0.16 // how bright a leg stays once the route has moved on
 const REST = 0.55 // brightness of every route once all legs have flown
+const DIMMED = 0.45 // while a trip is hovered, the other routes step back to this share of their brightness
 // Route line styles; ?line=pencil or ?line=stitch in the URL tries the others.
+// Stroke 0.6 keeps every line thick enough to hover and click.
 const LINES = {
-  ink: { stroke: 0.2, dash: 1, gap: 0 }, // thin solid ink
-  pencil: { stroke: 0.2, dash: 0.022, gap: 0.014 }, // short pencil dashes
-  stitch: { stroke: 0.36, dash: 0.005, gap: 0.016 }, // dotted, like a stitched route
+  ink: { stroke: 0.6, dash: 1, gap: 0 }, // solid ink
+  pencil: { stroke: 0.6, dash: 0.022, gap: 0.014 }, // short pencil dashes
+  stitch: { stroke: 0.6, dash: 0.005, gap: 0.016 }, // dotted, like a stitched route
 }
 const line = LINES[new URLSearchParams(window.location.search).get('line')] ?? LINES.ink
-const IDLE_MS = 2500 // untouched this long (and zoomed out), the globe starts its slow spin
+const FLY_MS = 1200 // camera flight to a trip or a city; App opens the page once it has landed
+const RING_COLOR = '#a8473a' // the home circle shares the home seal's vermilion
 const isPhone = () => window.innerWidth < 720
+
+// The city a trip is about: the one with the most photos (the earliest visit wins a tie).
+function mainCity(trip) {
+  return trip.cities.reduce((best, c) => (!best || c.photo_count > best.photo_count ? c : best), null)
+}
 const hexAlpha = (hex, a) => hex + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, '0')
 
 // Fog and blur only appear when the camera is pulled far back: clear at the default view
@@ -33,7 +41,7 @@ function applyFog(el, altitude) {
 }
 
 const GlobeView = forwardRef(function GlobeView(
-  { trips, story, cursor, home, follow, picking, onPick, onTripClick, onCityClick },
+  { trips, story, cursor, home, homeCircle, follow, picking, onPick, onTripClick, onCityClick },
   ref,
 ) {
   const globe = useRef()
@@ -42,6 +50,9 @@ const GlobeView = forwardRef(function GlobeView(
   const dust = useRef() // canvas for the pigment flecks around the rim
   const sparkles = useRef(null)
   const borders = useRef(null)
+  const ring = useRef(null) // dashed home circle, { lat, lng, km } from homeCircle
+  const circle = useRef(homeCircle)
+  circle.current = homeCircle
   const [size, setSize] = useState({ width: window.innerWidth, height: window.innerHeight })
   const [tick, setTick] = useState(0) // bumps each animation frame while lines draw or fade
   const [labels, setLabels] = useState([])
@@ -53,18 +64,24 @@ const GlobeView = forwardRef(function GlobeView(
   const labelCache = useRef(new Map())
   const handlers = useRef({})
   handlers.current = { onCityClick }
+  const [hoverTrip, setHoverTrip] = useState(null) // id of the trip whose line is under the pointer
 
+  // Both camera moves return how long the flight takes (0 if the camera didn't move).
   useImperativeHandle(ref, () => ({
+    // Face the trip's main city. Averaging all its cities would land in between them
+    // (Chengdu + Los Angeles averages to somewhere off Africa).
     flyTo(trip) {
-      const pts = trip.cities
-      const lat = pts.reduce((s, c) => s + c.lat, 0) / pts.length
-      const lng = pts.reduce((s, c) => s + c.lng, 0) / pts.length
+      const city = mainCity(trip)
+      if (!city || !globe.current) return 0
       touch()
-      globe.current.pointOfView({ lat, lng, altitude: 1.5 }, 1400)
+      globe.current.pointOfView({ lat: city.lat, lng: city.lng, altitude: 1.2 }, FLY_MS)
+      return FLY_MS
     },
     lookAt({ lat, lng }, altitude = 1.2) {
+      if (!globe.current) return 0
       touch()
-      globe.current.pointOfView({ lat, lng, altitude }, 1200)
+      globe.current.pointOfView({ lat, lng, altitude }, FLY_MS)
+      return FLY_MS
     },
     setRotating,
   }))
@@ -80,34 +97,50 @@ const GlobeView = forwardRef(function GlobeView(
     g.pointOfView({ lat: a.from.lat + (a.to.lat - a.from.lat) * 0.6, lng, altitude }, ms)
   }
 
-  // Idle spin: the globe turns slowly only while it is zoomed out and nobody has touched it
-  // for a few seconds. Any press, drag, zoom or hovering a pin stops it at once, so pins hold
-  // still when you go to click them. App can switch it off entirely (e.g. while a page is open).
-  const spin = useRef({ allowed: true, hover: false, last: 0, replay: false })
+  // Idle spin: the globe turns slowly only until the user first interacts with it. The first
+  // press, drag, zoom or click (or a camera flight it asks for) stops it for good, so from then
+  // on the globe stays exactly where the user leaves it. Hovering a pin or a line only pauses
+  // it, so the target holds still to be clicked. App can switch it off too (e.g. while a page
+  // is open or a home is being picked).
+  const spin = useRef({ allowed: true, hover: false, arcHover: false, touched: false, replay: false })
   spin.current.replay = follow // only while the replay is actually playing, not when paused on the bar
-  function touch() {
-    spin.current.last = performance.now()
+  function halt() {
     const controls = globe.current?.controls()
     if (controls) controls.autoRotate = false
   }
+  function touch() {
+    spin.current.touched = true
+    halt()
+  }
   function setRotating(on) {
     spin.current.allowed = on
-    touch()
+    if (!on) halt()
   }
   useEffect(() => {
     const id = setInterval(() => {
       const g = globe.current
       if (!g) return
       const s = spin.current
-      if (s.hover && !overlay.current?.querySelector('.pin:hover')) s.hover = false // pin went away under the pointer
-      const idle = performance.now() - s.last > IDLE_MS
       const controls = g.controls()
+      if (s.touched) {
+        controls.autoRotate = false
+        clearInterval(id) // the user has taken over; the spin never comes back
+        return
+      }
+      if (s.hover && !overlay.current?.querySelector('.pin:hover')) s.hover = false // pin went away under the pointer
       const altitude = g.pointOfView().altitude
-      controls.autoRotate = s.allowed && !s.hover && !s.replay && idle
+      controls.autoRotate = s.allowed && !s.hover && !s.arcHover && !s.replay
       controls.autoRotateSpeed = 0.35 * Math.max(0.2, Math.min(1, altitude / 2.3)) // gentler when close
     }, 300)
     return () => clearInterval(id)
   }, [])
+
+  // Hovering a line lights up its whole trip (and holds the spin so it can be clicked).
+  function hoverArc(arc) {
+    spin.current.arcHover = !!arc
+    if (arc) halt()
+    setHoverTrip(arc ? arc.trip.id : null)
+  }
 
   // Keep the canvas filling the window.
   useEffect(() => {
@@ -116,7 +149,18 @@ const GlobeView = forwardRef(function GlobeView(
     return () => ro.disconnect()
   }, [])
 
-  useEffect(() => () => borders.current?.dispose(), [])
+  useEffect(() => () => {
+    borders.current?.dispose()
+    ring.current?.dispose()
+  }, [])
+
+  // Redraw the home circle when its centre or radius changes (the camera doesn't move).
+  const ringLat = homeCircle?.lat
+  const ringLng = homeCircle?.lng
+  const ringKm = homeCircle?.km
+  useEffect(() => {
+    ring.current?.set(ringLat == null ? null : { lat: ringLat, lng: ringLng }, ringKm)
+  }, [ringLat, ringLng, ringKm])
 
   // Touching the globe with the pointer: the globe leans in a touch and a few pigment flecks
   // puff off the rim where the pointer came in. Mouse/trackpad only (no hover on phones).
@@ -183,6 +227,8 @@ const GlobeView = forwardRef(function GlobeView(
     g.pointOfView({ lat: home.lat - 8, lng: home.lng, altitude }, 0)
     borders.current = createBorderLayers(g.scene(), g.getGlobeRadius(), BORDER_COLOR)
     borders.current.setAltitude(altitude)
+    ring.current = createHomeRing(g.scene(), g.getGlobeRadius(), RING_COLOR)
+    ring.current.set(circle.current, circle.current?.km)
     applyFog(wrap.current, altitude)
     loadCities().then((list) => {
       cities.current = list
@@ -301,8 +347,8 @@ const GlobeView = forwardRef(function GlobeView(
           openStamp(el)
         })
         // Hovering a pin holds the globe still so it can be clicked.
-        el.addEventListener('pointerenter', () => { spin.current.hover = true; touch() })
-        el.addEventListener('pointerleave', () => { spin.current.hover = false; touch() })
+        el.addEventListener('pointerenter', () => { spin.current.hover = true; halt() })
+        el.addEventListener('pointerleave', () => { spin.current.hover = false })
         el.appendChild(button)
                 d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.95, tagW: 22 + city.name.length * 7.6 }
       }
@@ -486,11 +532,14 @@ const GlobeView = forwardRef(function GlobeView(
   }, [arcs, replay])
 
   // Each leg's colour carries its current brightness; a new identity each tick re-reads it.
+  // The hovered trip shows at full strength and the others step back.
+  const hovered = hoverTrip && trips.some((t) => t.id === hoverTrip) ? hoverTrip : null // ignore a trip that left the view
   const arcColor = useMemo(() => (d) => {
     const c = tripColor(d.trip)
-    const glow = d.glow ?? 1
+    let glow = d.glow ?? 1
+    if (hovered) glow = d.trip.id === hovered ? 1 : glow * DIMMED
     return [hexAlpha(c, glow * 0.96), hexAlpha(c, glow * (d.homeward ? 0.6 : 0.86))]
-  }, [tick, cursor]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tick, cursor, hovered]) // eslint-disable-line react-hooks/exhaustive-deps
   // A new accessor identity each tick tells react-globe.gl to re-read the offsets.
   const dashGap = useMemo(() => (d) => d.gap, [tick, cursor]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -523,6 +572,7 @@ const GlobeView = forwardRef(function GlobeView(
         arcDashInitialGap={dashGap}
         arcsTransitionDuration={0}
         arcLabel={(d) => `${d.trip.title} · ${d.trip.start_date}`}
+        onArcHover={hoverArc}
         onArcClick={(d) => onTripClick(d.trip)}
       />
       <canvas className="sparkles" ref={dust} />

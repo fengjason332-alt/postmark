@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { DRAW_MS, dotDate, isoDay, tripColor } from './data.js'
 
-// Bottom timeline: drag to replay trips in order, or press play to watch them unfold one by one.
-// The bar runs on the same story clock as the lines on the globe (see storyline in data.js):
-// each leg owns an equal stretch, so wherever the knob is, the line is drawn exactly that far.
-export default function Timeline({ trips, story, cursor, onCursor, onOpen, onPlaying }) {
+// Bottom timeline (shown only for a replay): drag to replay trips in order, or press play to
+// watch them unfold one by one. The bar runs on the same story clock as the lines on the globe
+// (see storyline in data.js): each leg owns an equal stretch, so wherever the knob is, the line
+// is drawn exactly that far. Each trip is a small dot; its title shows on hover or focus, and
+// for the named trip: the one the replay is in, otherwise the one the user last opened.
+export default function Timeline({ trips, story, cursor, selectedId, onCursor, onOpen, onPlaying, onClose }) {
   const [playing, setPlayingState] = useState(false)
   const setPlaying = (p) => {
     const next = typeof p === 'function' ? p(playing) : p
@@ -18,6 +20,9 @@ export default function Timeline({ trips, story, cursor, onCursor, onOpen, onPla
   const value = cursor ?? max
   const startOf = (t) => story.legs[t.id][0].start
   const pct = (t) => (startOf(t) / max) * 100
+  // Trips are in story order, so the last one that has started is the one the replay is in.
+  const current = cursor === null ? null : trips.reduce((hit, t) => (startOf(t) <= cursor ? t : hit), null)
+  const named = current?.id ?? selectedId
 
   return (
     <div className="timeline">
@@ -26,15 +31,17 @@ export default function Timeline({ trips, story, cursor, onCursor, onOpen, onPla
       </button>
       <div className="track">
         <div className="ticks">
+          {/* --shift slides each title so the first one starts at its dot and the last one ends at it. */}
           {trips.map((t) => (
             <button
               key={t.id}
-              className={`tick ${startOf(t) <= value ? 'on' : ''}`}
+              className={`tick ${startOf(t) <= value ? 'on' : ''} ${t.id === named ? 'selected' : ''}`}
               style={{ left: `${pct(t)}%`, '--c': tripColor(t), '--shift': `${-pct(t)}%` }}
               onClick={() => onOpen(t)}
-              title={`${t.title} · ${dotDate(t.start_date)}`}
+              aria-label={`${t.title}, ${dotDate(t.start_date)}`}
+              aria-current={t.id === named ? 'true' : undefined}
             >
-              <span>{t.title}</span>
+              <span className="tick-label" aria-hidden="true">{t.title}</span>
             </button>
           ))}
         </div>
@@ -57,6 +64,7 @@ export default function Timeline({ trips, story, cursor, onCursor, onOpen, onPla
           <span>{dotDate(trips[trips.length - 1].end_date)}</span>
         </div>
       </div>
+      <button className="replay-close" onClick={onClose} aria-label="Close replay">×</button>
       <Player playing={playing} max={max} onCursor={onCursor} onDone={() => setPlaying(false)} timer={timer} />
     </div>
   )

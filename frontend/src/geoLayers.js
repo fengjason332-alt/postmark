@@ -1,6 +1,6 @@
 // Zoom-dependent detail: vector borders that sharpen as you zoom in, and city names
 // that appear in order of size. Data is loaded lazily so the first paint stays fast.
-import { BufferGeometry, Float32BufferAttribute, LineBasicMaterial, LineSegments } from 'three'
+import { BufferGeometry, Float32BufferAttribute, Line, LineBasicMaterial, LineDashedMaterial, LineSegments } from 'three'
 import { mesh } from 'topojson-client'
 
 const toXYZ = (lat, lng, r) => {
@@ -78,6 +78,59 @@ export function createBorderLayers(scene, radius, color) {
 }
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v))
+
+const EARTH_KM = 6371
+const RING_POINTS = 180
+const RING_DASHES = 60 // dashes all the way round, whatever the circle's size
+
+// Points on the ground exactly `km` from the centre, all the way round (a geodesic circle),
+// as [lat, lng]; the first point is repeated at the end to close the loop.
+export function ringPoints({ lat, lng }, km, n = RING_POINTS) {
+  const d = km / EARTH_KM
+  const p1 = (lat * Math.PI) / 180
+  const l1 = (lng * Math.PI) / 180
+  const pts = []
+  for (let i = 0; i <= n; i++) {
+    const b = (2 * Math.PI * i) / n
+    const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b))
+    const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2))
+    pts.push([(p2 * 180) / Math.PI, (l2 * 180) / Math.PI])
+  }
+  return pts
+}
+
+// The home circle: a thin dashed ring on the ground around home. It never takes clicks or
+// hovers, so the globe, the trip lines and the stamps under it stay clickable.
+export function createHomeRing(scene, radius, color) {
+  const material = new LineDashedMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false })
+  const ring = new Line(new BufferGeometry(), material)
+  ring.renderOrder = 3
+  ring.visible = false
+  ring.raycast = () => {}
+  scene.add(ring)
+  return {
+    set(centre, km) {
+      if (!centre || !(km > 0)) {
+        ring.visible = false
+        return
+      }
+      const pos = ringPoints(centre, km).flatMap(([lat, lng]) => toXYZ(lat, lng, radius * 1.0008))
+      ring.geometry.dispose()
+      ring.geometry = new BufferGeometry()
+      ring.geometry.setAttribute('position', new Float32BufferAttribute(pos, 3))
+      ring.computeLineDistances()
+      const step = (2 * Math.PI * radius * Math.sin(km / EARTH_KM)) / RING_DASHES
+      material.dashSize = step * 0.55
+      material.gapSize = step * 0.45
+      ring.visible = true
+    },
+    dispose() {
+      scene.remove(ring)
+      ring.geometry.dispose()
+      material.dispose()
+    },
+  }
+}
 
 let cityCache = null
 export async function loadCities() {
