@@ -29,6 +29,7 @@ async function fetchJson(url) {
 export const STYLES = {
   journal: { label: 'Journal', colors: ['#2f5d7c', '#8a4f7d', '#3f6f52', '#a0592d', '#4b5a92', '#8c3b4a', '#6b6a2f', '#2f7470'], border: '#3a3026' },
   ink: { label: 'Ink wash', colors: ['#1d1d1b', '#3a4048', '#4a3b30', '#2f3f3b', '#45384a', '#2c3440'], border: '#1d1d1b' },
+  gouache: { label: 'Gouache', colors: ['#34557a', '#a8473a', '#b8862a', '#4f6b52', '#6e4a63', '#2f3a45'], border: '#3a4552' },
 }
 let palette = STYLES.journal.colors
 let activeStyle = 'journal'

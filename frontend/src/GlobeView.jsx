@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import Globe from 'react-globe.gl'
 import { MeshPhongMaterial } from 'three'
-import { makeGlobeTexture, makeInkTexture } from './globeTexture.js'
+import { makeGlobeTexture, makeGouacheTexture, makeInkTexture } from './globeTexture.js'
 import { homeSeal, postmark } from './stamps.js'
 import { citiesOf, STYLES, tripColor } from './data.js'
 import { angularDistance, createBorderLayers, loadCities, visibleCities } from './geoLayers.js'
@@ -12,13 +12,21 @@ const DRAW_MS = 1100 // how long one ink line takes to write itself
 const STAGGER_MS = 650 // gap between consecutive trips when several appear at once
 const isPhone = () => window.innerWidth < 720
 const textures = {}
-const textureFor = (style) => (textures[style] ??= style === 'ink' ? makeInkTexture() : makeGlobeTexture())
+const PAINTERS = { journal: makeGlobeTexture, ink: makeInkTexture, gouache: makeGouacheTexture }
+const textureFor = (style) => (textures[style] ??= PAINTERS[style]())
+
+// Per-style globe look: halo colour and size, arc colours (start, end alpha) and line weight.
+const LOOK = {
+  journal: { halo: '#cbbf9f', haloSize: 0.11, alpha: ['ee', 'cc'], stroke: 0.42, fog: 1 },
+  ink: { halo: '#bfbcb2', haloSize: 0.16, alpha: ['f0', '88'], stroke: 0.5, fog: 1.25 },
+  gouache: { halo: '#c9cdd0', haloSize: 0.13, alpha: ['f4', 'dd'], stroke: 0.55, fog: 1.1 },
+}
 
 // Fog and blur fade out as the camera comes in: thick at the default view, gone by altitude ~0.9.
 function applyFog(el, altitude, style) {
   if (!el) return // the camera can report in before the wrapper is mounted
   const t = Math.max(0, Math.min(1, (altitude - 0.9) / 2.2))
-  const strength = style === 'ink' ? 1.25 : 1
+  const strength = LOOK[style].fog
   el.style.setProperty('--fog-blur', `${(t * 2.6 * strength).toFixed(2)}px`)
   el.style.setProperty('--fog-wash', (t * 0.55 * strength).toFixed(3))
 }
@@ -175,9 +183,9 @@ const GlobeView = forwardRef(function GlobeView(
     const el = document.createElement('div')
     el.className = 'marker seal'
     el.title = `Home · ${home.city}`
-    el.innerHTML = homeSeal(home.city)
+    el.innerHTML = homeSeal(home.city, style)
     return { id: 'home', lat: home.lat, lng: home.lng, el }
-  }, [home])
+  }, [home, style])
 
   // Small map labels for nearby cities; visited cities already have a stamp, so skip them.
   const labelData = useMemo(() => {
@@ -218,7 +226,7 @@ const GlobeView = forwardRef(function GlobeView(
 
   // A new accessor identity each tick tells react-globe.gl to re-read the gaps.
   const dashGap = useMemo(() => (d) => d.gap, [tick]) // eslint-disable-line react-hooks/exhaustive-deps
-  const ink = style === 'ink'
+  const look = LOOK[style]
 
   return (
     <div className={`globe ${picking ? 'picking' : ''}`} ref={wrap}>
@@ -234,15 +242,15 @@ const GlobeView = forwardRef(function GlobeView(
         globeImageUrl={texture}
         globeMaterial={material}
         showAtmosphere
-        atmosphereColor={ink ? '#bfbcb2' : '#cbbf9f'}
-        atmosphereAltitude={ink ? 0.16 : 0.11}
+        atmosphereColor={look.halo}
+        atmosphereAltitude={look.haloSize}
         arcsData={arcs}
         arcStartLat={(d) => d.from.lat}
         arcStartLng={(d) => d.from.lng}
         arcEndLat={(d) => d.to.lat}
         arcEndLng={(d) => d.to.lng}
-        arcColor={(d) => (ink ? [tripColor(d.trip) + 'f0', tripColor(d.trip) + '88'] : [tripColor(d.trip) + 'ee', tripColor(d.trip) + 'cc'])}
-        arcStroke={ink ? 0.5 : 0.42}
+        arcColor={(d) => look.alpha.map((a) => tripColor(d.trip) + a)}
+        arcStroke={look.stroke}
         arcAltitudeAutoScale={0.32}
         arcDashLength={1}
         arcDashGap={2}

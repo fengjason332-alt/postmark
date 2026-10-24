@@ -307,6 +307,62 @@ button { font: inherit; color: inherit; cursor: pointer; }
 :root[data-style='ink'] .city-label { font-style: italic; font-size: 12px; }
 :root[data-style='ink'] .city-label.major { font-size: 14px; }
 
+/* ---------- gouache style ---------- */
+:root[data-style='gouache'] {
+  --paper: #f3efe7;
+  --ink: #2f3a45;
+  --ink-soft: #6f7680;
+  --vermilion: #a8473a;
+  --page: #f6f2ea;
+  --serif: 'Cormorant Garamond', 'Noto Serif SC', Georgia, serif;
+  --hand: 'Cormorant Garamond', 'Noto Serif SC', Georgia, serif;
+}
+:root[data-style='gouache'] body {
+  background-image:
+    radial-gradient(ellipse at 50% 44%, rgba(250, 248, 243, 0.95), rgba(240, 235, 225, 0.75) 68%, rgba(222, 215, 202, 0.85)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.3 0 0 0 0 0.3 0 0 0 0 0.32 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root[data-style='gouache'] .brand h1 { font-style: italic; font-weight: 500; font-size: 48px; letter-spacing: 0.5px; }
+:root[data-style='gouache'] .tagline { font-style: italic; font-size: 20px; }
+:root[data-style='gouache'] .sentence { font-family: var(--serif); font-size: 19px; line-height: 1.5; }
+:root[data-style='gouache'] .range { background: rgba(246, 242, 234, 0.8); }
+:root[data-style='gouache'] .tick span { font-style: italic; font-size: 18px; }
+:root[data-style='gouache'] .seal { width: 46px; height: 46px; }
+:root[data-style='gouache'] .seal-svg { transform: none; filter: drop-shadow(0 1px 1px rgba(40, 40, 50, 0.18)); }
+:root[data-style='gouache'] .city-label { font-family: var(--serif); font-style: italic; font-size: 13px; }
+:root[data-style='gouache'] .city-label.major { font-size: 15px; }
+/* The logbook becomes a sketchbook: plain cream pages, wide margins, no tape or tilt. */
+:root[data-style='gouache'] .cover, :root[data-style='gouache'] .page { background-color: var(--page); background-image: none; }
+:root[data-style='gouache'] .page { padding: 48px 56px; }
+:root[data-style='gouache'] .page h2 { font-style: italic; font-weight: 500; font-size: 48px; }
+:root[data-style='gouache'] .kicker, :root[data-style='gouache'] .day-no { font-style: italic; color: var(--ink-soft); }
+:root[data-style='gouache'] .route .hand { font-style: italic; font-size: 17px; color: var(--ink-soft); }
+:root[data-style='gouache'] .book { box-shadow: 0 30px 60px -26px rgba(30, 36, 44, 0.4), 0 0 0 1px rgba(30, 36, 44, 0.1); }
+:root[data-style='gouache'] .collage { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 34px 30px; }
+:root[data-style='gouache'] .taped { padding: 0; background: none; box-shadow: none; transform: none; }
+:root[data-style='gouache'] .taped:hover { transform: translateY(-2px); }
+:root[data-style='gouache'] .taped::before { display: none; }
+:root[data-style='gouache'] .taped figcaption.hand { position: static; color: var(--ink-soft); text-shadow: none; font-size: 13px; font-style: italic; text-align: center; }
+.taped figcaption.title { position: static; text-shadow: none; display: block; margin-top: 10px; text-align: center; font-family: var(--serif); font-style: italic; font-size: 16px; color: var(--ink); }
+.painting-wait {
+  display: block; width: 100%; aspect-ratio: 4 / 3;
+  background: linear-gradient(100deg, #ece6da 30%, #f5f1e9 50%, #ece6da 70%) 0 0 / 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+.painting-wait.big { width: min(520px, 80vw); }
+@keyframes shimmer { to { background-position: -200% 0; } }
+.gouache-card { background: rgba(236, 231, 222, 0.94); }
+.gouache-card figure {
+  display: flex; flex-direction: column; align-items: center; gap: 22px;
+  background: #f6f2ea; padding: 36px 48px 30px; max-height: calc(100vh - 48px); overflow: auto;
+  box-shadow: 0 24px 60px -20px rgba(30, 36, 44, 0.35);
+}
+.gouache-card img { max-height: calc((100vh - 220px) / 2); max-width: min(560px, 80vw); }
+.gouache-card .original { box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.4); }
+.gouache-card figcaption { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; text-align: center; }
+.gouache-card strong { font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 500; font-size: 30px; color: #2f3a45; }
+.gouache-card figcaption span { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 15px; letter-spacing: 1px; color: #6f7680; }
+
 @media (max-width: 720px) {
   .controls { gap: 6px; }
   .home-picker { position: fixed; left: 16px; right: 16px; top: 120px; width: auto; z-index: 5; }
