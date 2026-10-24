@@ -38,7 +38,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .app { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .app img { -webkit-user-drag: none; }
 .app input, .app textarea, .overlay { -webkit-user-select: text; user-select: text; }
-.globe { position: absolute; inset: 0; isolation: isolate; z-index: 0; } /* keep map labels under overlays */
+.globe { position: absolute; inset: 0; isolation: isolate; z-index: 0; transition: transform 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); } /* keep map labels under overlays */
+/* The globe leans in slightly when the pointer touches it. */
+.globe.touched { transform: scale(1.018); }
+.sparkles { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .globe.touched { transform: none; } }
 .globe canvas {
   outline: none;
   /* Far away the globe sits in fog; it clears as you zoom in (vars set from GlobeView). */
@@ -97,7 +101,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* The dot is the pin itself: always clickable, with a finger-sized hit area. */
 .stamp .pin-dot { pointer-events: auto; cursor: pointer; transition: transform 0.2s; }
 .stamp .pin-dot::after { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
-.stamp:hover .pin-dot { transform: scale(1.5); }
+.stamp .pin-dot:hover { transform: scale(1.5); }
+.stamp.has-more .pin-dot, .stamp.clustered .pin-dot { pointer-events: none; }
+.stamp.clustered .pin-dot { opacity: 0.55; }
 /* A crowd of stamps (zoomed out) shows as one numbered bubble in the middle of its dots. */
 .stamp .more {
   position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border-radius: 50%; display: none;
