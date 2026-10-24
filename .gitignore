@@ -12,4 +12,12 @@ __pycache__/
 
 # Real photo data stays local (AGENTS.md)
 frontend/public/data/
+*.csv
+!results/*.csv
+
+# Build output
 dist/
+
+# Personal Claude Code settings and worktrees
+.claude/settings.local.json
+.claude/worktrees/

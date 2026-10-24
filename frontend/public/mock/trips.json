@@ -1,0 +1,250 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-10-24T12:00:00-04:00",
+  "home": {
+    "city": "Boston",
+    "country": "United States",
+    "country_code": "US",
+    "lat": 42.3601,
+    "lng": -71.0589
+  },
+  "trips": [
+    {
+      "id": "trip_20260314_newyork",
+      "index": 0,
+      "title": "New York",
+      "start_date": "2026-03-14",
+      "end_date": "2026-03-17",
+      "days": 4,
+      "distance_km": 306,
+      "photo_count": 5,
+      "cover_photo_id": "p_f104395268",
+      "tags": [
+        "city",
+        "food",
+        "architecture",
+        "nature"
+      ],
+      "cities": [
+        {
+          "id": "city_newyork_us",
+          "name": "New York",
+          "country": "United States",
+          "country_code": "US",
+          "lat": 40.7128,
+          "lng": -74.006,
+          "arrive": "2026-03-14",
+          "leave": "2026-03-17",
+          "photo_count": 5
+        }
+      ],
+      "photos": [
+        {
+          "id": "p_f104395268",
+          "taken_at": "2026-03-14T15:32:08-04:00",
+          "date": "2026-03-14",
+          "lat": 40.758,
+          "lng": -73.9855,
+          "has_gps": true,
+          "city_id": "city_newyork_us",
+          "thumb": "thumbs/p_f104395268_s.webp",
+          "full": "thumbs/p_f104395268_l.webp",
+          "width": 1600,
+          "height": 1200,
+          "tags": [
+            "city"
+          ]
+        },
+        {
+          "id": "p_4ac2333a2a",
+          "taken_at": "2026-03-14T19:05:41-04:00",
+          "date": "2026-03-14",
+          "lat": 40.7306,
+          "lng": -73.9866,
+          "has_gps": true,
+          "city_id": "city_newyork_us",
+          "thumb": "thumbs/p_4ac2333a2a_s.webp",
+          "full": "thumbs/p_4ac2333a2a_l.webp",
+          "width": 1200,
+          "height": 1600,
+          "tags": [
+            "food"
+          ]
+        },
+        {
+          "id": "p_6d1347ab46",
+          "taken_at": "2026-03-15T11:20:13-04:00",
+          "date": "2026-03-15",
+          "lat": 40.7829,
+          "lng": -73.9654,
+          "has_gps": true,
+          "city_id": "city_newyork_us",
+          "thumb": "thumbs/p_6d1347ab46_s.webp",
+          "full": "thumbs/p_6d1347ab46_l.webp",
+          "width": 1600,
+          "height": 1200,
+          "tags": [
+            "nature"
+          ]
+        },
+        {
+          "id": "p_691fea6595",
+          "taken_at": "2026-03-16T14:47:55-04:00",
+          "date": "2026-03-16",
+          "lat": 40.7061,
+          "lng": -73.9969,
+          "has_gps": true,
+          "city_id": "city_newyork_us",
+          "thumb": "thumbs/p_691fea6595_s.webp",
+          "full": "thumbs/p_691fea6595_l.webp",
+          "width": 1600,
+          "height": 1200,
+          "tags": [
+            "city",
+            "architecture"
+          ]
+        },
+        {
+          "id": "p_d47b621eb5",
+          "taken_at": "2026-03-17T09:12:30-04:00",
+          "date": "2026-03-17",
+          "lat": 40.742,
+          "lng": -74.0048,
+          "has_gps": true,
+          "city_id": "city_newyork_us",
+          "thumb": "thumbs/p_d47b621eb5_s.webp",
+          "full": "thumbs/p_d47b621eb5_l.webp",
+          "width": 1200,
+          "height": 1600,
+          "tags": [
+            "food"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "trip_20260702_montreal",
+      "index": 1,
+      "title": "Montreal",
+      "start_date": "2026-07-02",
+      "end_date": "2026-07-04",
+      "days": 3,
+      "distance_km": 636,
+      "photo_count": 5,
+      "cover_photo_id": "p_3c5535d59c",
+      "tags": [
+        "architecture",
+        "food",
+        "city",
+        "nature"
+      ],
+      "cities": [
+        {
+          "id": "city_montreal_ca",
+          "name": "Montreal",
+          "country": "Canada",
+          "country_code": "CA",
+          "lat": 45.5019,
+          "lng": -73.5674,
+          "arrive": "2026-07-02",
+          "leave": "2026-07-03",
+          "photo_count": 3
+        },
+        {
+          "id": "city_quebeccity_ca",
+          "name": "Quebec City",
+          "country": "Canada",
+          "country_code": "CA",
+          "lat": 46.8139,
+          "lng": -71.208,
+          "arrive": "2026-07-04",
+          "leave": "2026-07-04",
+          "photo_count": 2
+        }
+      ],
+      "photos": [
+        {
+          "id": "p_3c5535d59c",
+          "taken_at": "2026-07-02T13:15:02-04:00",
+          "date": "2026-07-02",
+          "lat": 45.5088,
+          "lng": -73.554,
+          "has_gps": true,
+          "city_id": "city_montreal_ca",
+          "thumb": "thumbs/p_3c5535d59c_s.webp",
+          "full": "thumbs/p_3c5535d59c_l.webp",
+          "width": 1600,
+          "height": 1200,
+          "tags": [
+            "architecture"
+          ]
+        },
+        {
+          "id": "p_535469b4b3",
+          "taken_at": "2026-07-02T18:42:19-04:00",
+          "date": "2026-07-02",
+          "lat": 45.523,
+          "lng": -73.581,
+          "has_gps": true,
+          "city_id": "city_montreal_ca",
+          "thumb": "thumbs/p_535469b4b3_s.webp",
+          "full": "thumbs/p_535469b4b3_l.webp",
+          "width": 1200,
+          "height": 1600,
+          "tags": [
+            "food"
+          ]
+        },
+        {
+          "id": "p_b590e9acf3",
+          "taken_at": "2026-07-03T10:05:47-04:00",
+          "date": "2026-07-03",
+          "lat": 45.5048,
+          "lng": -73.5874,
+          "has_gps": true,
+          "city_id": "city_montreal_ca",
+          "thumb": "thumbs/p_b590e9acf3_s.webp",
+          "full": "thumbs/p_b590e9acf3_l.webp",
+          "width": 1600,
+          "height": 1200,
+          "tags": [
+            "nature"
+          ]
+        },
+        {
+          "id": "p_b53d7d9b36",
+          "taken_at": "2026-07-04T12:30:11-04:00",
+          "date": "2026-07-04",
+          "lat": 46.8123,
+          "lng": -71.2046,
+          "has_gps": true,
+          "city_id": "city_quebeccity_ca",
+          "thumb": "thumbs/p_b53d7d9b36_s.webp",
+          "full": "thumbs/p_b53d7d9b36_l.webp",
+          "width": 1600,
+          "height": 1200,
+          "tags": [
+            "architecture",
+            "city"
+          ]
+        },
+        {
+          "id": "p_b198638221",
+          "taken_at": "2026-07-04T16:58:36-04:00",
+          "date": "2026-07-04",
+          "lat": 46.8106,
+          "lng": -71.2148,
+          "has_gps": true,
+          "city_id": "city_quebeccity_ca",
+          "thumb": "thumbs/p_b198638221_s.webp",
+          "full": "thumbs/p_b198638221_l.webp",
+          "width": 1200,
+          "height": 1600,
+          "tags": [
+            "food"
+          ]
+        }
+      ]
+    }
+  ]
+}
