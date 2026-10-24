@@ -27,10 +27,21 @@ Algorithm (parameters in DEFAULT_PARAMS):
   2. City of a point: among places within prefer_radius_km pick the most populous (ties: nearest,
      then smallest geonameid), so a trip is named after Chengdu and not one of its districts;
      with none, take the nearest place if it is within max_city_km, else no city.
-  3. Per trip: group its GPS photos by city; keep cities with at least min_city_photos photos
-     (if that would drop all of them, keep only the main city). Main city = most photos, ties
-     to the earliest first visit; title = main city name. arrive / leave = earliest / latest
-     photo date in that city.
+  3. Per trip: group its GPS photos by city. Radius R of a file pair = the R in
+     trips_pred_r{R}.csv; the default pair (trips_pred.csv) uses segment.DEFAULT_RADIUS_KM.
+     The trip's home = the homes.csv period containing its start_date (the real point is used
+     in memory only); its home city = the matching homes_city.csv row. Cities whose GeoNames
+     centre is within R km of that home, and the home city itself, are dropped. Then:
+       a. Keep the remaining cities with at least min_city_photos photos, in first-visit order.
+          Main city = most photos, ties to the earliest first visit; title = main city name.
+       b. None kept but some remain: keep only the main one (title = its name).
+       c. No city remains but a photo lies more than R km from home: take the farthest such
+          photo, the nearest gazetteer place at any distance (no prefer rule, no max_city_km)
+          becomes the single city (photo_count = photos outside the circle) and
+          title = "Near <name>"; the console shows "Near <name> (CC)".
+       d. No photo outside the circle: keep the home city (title = its name).
+     A trip whose start_date is in no home period is not home-filtered (a count is printed).
+     arrive / leave = earliest / latest photo date in that city.
 
 Cities are named from GeoNames (https://www.geonames.org/), licensed CC BY 4.0.
 Only counts, dates, city names and country codes are printed; never coordinates or file names.
@@ -42,15 +53,20 @@ import argparse
 import csv
 import re
 import sys
+from collections import namedtuple
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
 
-from segment import DEFAULT_RADIUS_KM, EARTH_RADIUS_KM, RADIUS_OPTIONS_KM, prepare_photos
+from segment import (DEFAULT_RADIUS_KM, EARTH_RADIUS_KM, RADIUS_OPTIONS_KM, haversine_km,
+                     prepare_photos)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Per-photo lookups: time-order rank, ISO date, gazetteer index (or -1), (lat, lng) in memory.
+PhotoIndex = namedtuple("PhotoIndex", "rank date city xy")
 
 DEFAULT_PARAMS = {
     "exclude_feature_codes": ["PPLX", "PPLH", "PPLQ", "PPLW"],
@@ -187,6 +203,11 @@ class CityFinder:
                     chosen[i], dist[i] = int(nearest_idx[i][0]), km
         return chosen, dist
 
+    def nearest(self, lat, lng):
+        """Index of the nearest place at any distance (no prefer rule, no max_city_km)."""
+        _, idx = self.tree.query(np.radians([[lat, lng]]), k=1)
+        return int(idx[0][0])
+
 
 def city_centre(gaz, index):
     """(lat, lng) strings with 4 decimals of the gazetteer place at `index`."""
@@ -194,9 +215,14 @@ def city_centre(gaz, index):
 
 
 def geocode_photos(photos_df, finder):
-    """photo_cities frame (GPS photos only, photos_clean order) plus {photo_id: gaz index}."""
+    """photo_cities frame (GPS photos only, photos_clean order) plus per-photo lookups.
+
+    Also returns {photo_id: gaz index or -1} and {photo_id: (lat, lng)}; the coordinates stay
+    in memory for distance calculations and are never written or printed.
+    """
     gps = photos_df[photos_df["has_gps"].astype(str).str.lower() == "true"]
-    chosen, dist = finder.find(gps["lat"].astype(float), gps["lng"].astype(float))
+    lats, lngs = gps["lat"].astype(float), gps["lng"].astype(float)
+    chosen, dist = finder.find(lats, lngs)
     rows = []
     for photo_id, idx, km in zip(gps["photo_id"], chosen, dist):
         if idx < 0:
@@ -205,79 +231,128 @@ def geocode_photos(photos_df, finder):
             rows.append({"photo_id": photo_id, "city_id": finder.gaz["city_id"].iat[idx],
                          "distance_km": f"{km:.1f}"})
     frame = pd.DataFrame(rows, columns=PHOTO_CITY_COLUMNS)
-    return frame, dict(zip(gps["photo_id"], chosen.tolist()))
+    xy = {pid: (float(a), float(b)) for pid, a, b in zip(gps["photo_id"], lats, lngs)}
+    return frame, dict(zip(gps["photo_id"], chosen.tolist())), xy
 
 
-def trip_city_table(photo_trips, photo_rank, photo_date, photo_city_index, gaz, countries,
-                    params):
-    """{trip_id: {"rows": [trip_cities rows], "title": main city name}} for one radius.
+def period_home(periods, day):
+    """(lat, lng, city index or -1) of the home period containing `day`, or None."""
+    for start, end, lat, lng, idx in periods:
+        if start <= day <= end:
+            return lat, lng, idx
+    return None
 
-    photo_rank / photo_date: {photo_id: time-order rank / ISO date}.
-    photo_city_index: {photo_id: gaz index or -1} for GPS photos.
+
+def plan_trip(trip_id, members, span, home, photos, finder, countries, params, radius_km):
+    """Choose the cities of one trip. Returns (trip_cities rows, title, near flag).
+
+    members: time-ordered [(rank, photo_id)] of the trip's GPS photos; span = (start, end);
+    home = period_home(...) or None (no home period: no home-area filtering).
+    Steps (see module docstring): drop home-area cities, apply min_city_photos, then the
+    fallbacks "main outside city", "Near <city>" and "home city".
     """
-    members = sorted((photo_rank[pid], pid, trip)
-                     for pid, trip in zip(photo_trips["photo_id"], photo_trips["trip_id"])
-                     if photo_city_index.get(pid, -1) >= 0 and pid in photo_rank)
-    visits = {}  # trip_id -> {gaz index: {"first": rank, "dates": [...]}}
-    for rank, pid, trip in members:
-        entry = visits.setdefault(trip, {}).setdefault(
-            photo_city_index[pid], {"first": rank, "dates": []})
-        entry["dates"].append(photo_date[pid])
+    gaz = finder.gaz
+    visits = {}
+    for rank, pid in members:
+        idx = photos.city.get(pid, -1)
+        if idx >= 0:
+            entry = visits.setdefault(idx, {"first": rank, "dates": []})
+            entry["dates"].append(photos.date[pid])
+    ordered = sorted(visits.items(), key=lambda kv: kv[1]["first"])
 
-    result = {}
-    for trip, cities in visits.items():
-        ordered = sorted(cities.items(), key=lambda kv: kv[1]["first"])
-        main = max(ordered, key=lambda kv: (len(kv[1]["dates"]), -kv[1]["first"]))
-        kept = [kv for kv in ordered if len(kv[1]["dates"]) >= params["min_city_photos"]]
+    def city_row(idx, count, arrive, leave):
+        lat, lng = city_centre(gaz, idx)
+        code = gaz["country_code"].iat[idx]
+        return {"trip_id": trip_id, "city_id": gaz["city_id"].iat[idx],
+                "name": gaz["name"].iat[idx], "country": countries.get(code, ""),
+                "country_code": code, "lat": lat, "lng": lng, "arrive": arrive,
+                "leave": leave, "photo_count": count}
+
+    def visit_row(kv):
+        return city_row(kv[0], len(kv[1]["dates"]), min(kv[1]["dates"]), max(kv[1]["dates"]))
+
+    def main_of(items):  # most photos, ties to the earliest first visit
+        return max(items, key=lambda kv: (len(kv[1]["dates"]), -kv[1]["first"]))
+
+    if home is None:
+        candidates = ordered
+    else:
+        home_lat, home_lng, home_idx = home
+        candidates = [kv for kv in ordered if kv[0] != home_idx and float(haversine_km(
+            gaz["lat"].iat[kv[0]], gaz["lng"].iat[kv[0]], home_lat, home_lng)) > radius_km]
+    if candidates:
+        kept = [kv for kv in candidates if len(kv[1]["dates"]) >= params["min_city_photos"]]
         if not kept:
-            kept = [main]
-        rows = []
-        for idx, entry in kept:
-            lat, lng = city_centre(gaz, idx)
-            code = gaz["country_code"].iat[idx]
-            rows.append({"trip_id": trip, "city_id": gaz["city_id"].iat[idx],
-                         "name": gaz["name"].iat[idx], "country": countries.get(code, ""),
-                         "country_code": code, "lat": lat, "lng": lng,
-                         "arrive": min(entry["dates"]), "leave": max(entry["dates"]),
-                         "photo_count": len(entry["dates"])})
-        result[trip] = {"rows": rows, "title": gaz["name"].iat[main[0]]}
-    return result
+            kept = [main_of(candidates)]
+        return ([visit_row(kv) for kv in kept], gaz["name"].iat[main_of(kept)[0]], False)
+    if home is None:
+        return [], "", False
+
+    if members:
+        coords = np.array([photos.xy[pid] for _, pid in members])
+        dist = haversine_km(coords[:, 0], coords[:, 1], home_lat, home_lng)
+        outside = [i for i in range(len(members)) if dist[i] > radius_km]
+    else:
+        outside = []
+    if outside:
+        far = max(outside, key=lambda i: (dist[i], -i))   # farthest photo, ties -> earliest
+        idx = finder.nearest(*photos.xy[members[far][1]])
+        dates = [photos.date[members[i][1]] for i in outside]
+        return ([city_row(idx, len(outside), min(dates), max(dates))],
+                "Near " + gaz["name"].iat[idx], True)
+    if home_idx < 0:
+        return [], "", False
+    dates = [photos.date[pid] for _, pid in members if photos.city.get(pid, -1) == home_idx]
+    row = city_row(home_idx, len(dates), min(dates) if dates else span[0],
+                   max(dates) if dates else span[1])
+    return [row], gaz["name"].iat[home_idx], False
 
 
-def geocode_pair(root, suffix, photo_rank, photo_date, photo_city_index, gaz, countries,
-                 params):
+def geocode_pair(root, suffix, photos, finder, countries, params, periods, radius_km):
     """Write trip_cities{suffix}.csv and rewrite trips_pred{suffix}.csv in place.
 
-    Returns [(start_date, end_date, [(name, country_code), ...])] in trips_pred order.
+    Returns ([(start_date, end_date, [(display name, country_code), ...])] in trips_pred
+    order, number of trips without a matching home period).
     """
     root = Path(root)
     trips_path = root / with_suffix(TRIPS_REL, suffix)
     trips = pd.read_csv(trips_path, dtype=str, keep_default_na=False)
     photo_trips = pd.read_csv(root / with_suffix(PHOTO_TRIPS_REL, suffix), dtype=str,
                               keep_default_na=False)
-    table = trip_city_table(photo_trips, photo_rank, photo_date, photo_city_index, gaz,
-                            countries, params)
+    by_trip = {}
+    for pid, trip in zip(photo_trips["photo_id"], photo_trips["trip_id"]):
+        if pid in photos.xy and pid in photos.rank:
+            by_trip.setdefault(trip, []).append((photos.rank[pid], pid))
 
-    city_rows, summary, cities_text, titles = [], [], [], []
-    for trip_id in trips["trip_id"]:
-        entry = table.get(trip_id)
-        rows = entry["rows"] if entry else []
+    city_rows, summary, cities_text, titles, unmatched = [], [], [], [], 0
+    for trip_id, start, end in zip(trips["trip_id"], trips["start_date"], trips["end_date"]):
+        home = period_home(periods, start)
+        unmatched += home is None
+        rows, title, near = plan_trip(trip_id, sorted(by_trip.get(trip_id, [])), (start, end),
+                                      home, photos, finder, countries, params, radius_km)
         city_rows.extend(rows)
         cities_text.append(";".join(r["name"] for r in rows))
-        titles.append(entry["title"] if entry else "")
-        summary.append([(r["name"], r["country_code"]) for r in rows])
+        titles.append(title)
+        summary.append([(("Near " + r["name"]) if near else r["name"], r["country_code"])
+                        for r in rows])
     trips["cities"] = cities_text
     trips["title"] = titles  # assigned by name: appended once, overwritten on a re-run
     trips.to_csv(trips_path, index=False)
     pd.DataFrame(city_rows, columns=TRIP_CITY_COLUMNS).to_csv(
         root / with_suffix(TRIP_CITIES_REL, suffix), index=False)
-    return list(zip(trips["start_date"], trips["end_date"], summary))
+    return list(zip(trips["start_date"], trips["end_date"], summary)), unmatched
 
 
 def geocode_homes(homes_df, finder):
-    """homes_city frame: the city centre of every home period (never the home point)."""
+    """Return (homes_city frame, home periods).
+
+    The frame holds the city centre of every home period (never the home point). The periods
+    [(from_date, to_date, lat, lng, city index or -1)] keep the real point for in-memory
+    distance calculations only.
+    """
     gaz = finder.gaz
-    chosen, _ = finder.find(homes_df["lat"].astype(float), homes_df["lng"].astype(float))
+    lats, lngs = homes_df["lat"].astype(float), homes_df["lng"].astype(float)
+    chosen, _ = finder.find(lats, lngs)
     rows = []
     for start, end, idx in zip(homes_df["from_date"], homes_df["to_date"], chosen):
         row = {"from_date": start, "to_date": end, "city_id": "", "name": "",
@@ -287,7 +362,9 @@ def geocode_homes(homes_df, finder):
             row.update({"city_id": gaz["city_id"].iat[idx], "name": gaz["name"].iat[idx],
                         "country_code": gaz["country_code"].iat[idx], "lat": lat, "lng": lng})
         rows.append(row)
-    return pd.DataFrame(rows, columns=HOME_CITY_COLUMNS)
+    periods = [(s, e, float(a), float(b), int(i)) for s, e, a, b, i in
+               zip(homes_df["from_date"], homes_df["to_date"], lats, lngs, chosen)]
+    return pd.DataFrame(rows, columns=HOME_CITY_COLUMNS), periods
 
 
 def build_parser():
@@ -308,7 +385,8 @@ def city_label(name, country_code):
     return f"{name} ({country_code})" if country_code else name
 
 
-def format_report(photo_count, with_city, done, skipped, default_trips, homes_city):
+def format_report(photo_count, with_city, done, skipped, default_trips, homes_city,
+                  unmatched=0):
     """Console lines: counts, trip dates, city names and country codes only."""
     lines = [f"GPS photos with a city: {with_city} of {photo_count}"]
     radii = [str(r) for r in done if r is not None]
@@ -318,6 +396,8 @@ def format_report(photo_count, with_city, done, skipped, default_trips, homes_ci
     lines.append(text)
     if skipped:
         lines.append("Radii skipped (files missing): " + ", ".join(skipped))
+    if unmatched:
+        lines.append(f"Trips without a home period (not filtered): {unmatched}")
     lines.append(f"Trips at default radius ({DEFAULT_RADIUS_KM} km): "
                  + (str(len(default_trips)) if default_trips is not None else "n/a"))
     for start, end, cities in default_trips or []:
@@ -348,30 +428,34 @@ def run(root, params):
     countries = load_countries(root)
     finder = CityFinder(gaz, params)
 
-    photo_cities, photo_city_index = geocode_photos(photos, finder)
+    photo_cities, photo_city_index, photo_xy = geocode_photos(photos, finder)
     photo_cities.to_csv(root / PHOTO_CITIES_REL, index=False)
 
     prepared = prepare_photos(photos)
     photo_rank = {pid: rank for rank, pid in enumerate(prepared["photo_id"])}
     photo_date = {pid: day.isoformat() for pid, day in zip(prepared["photo_id"], prepared["day"])}
+    index = PhotoIndex(photo_rank, photo_date, photo_city_index, photo_xy)
 
-    done, skipped, default_trips = [], [], None
+    homes_city, periods = geocode_homes(homes, finder)
+    homes_city.to_csv(root / HOMES_CITY_REL, index=False)
+
+    done, skipped, default_trips, unmatched = [], [], None, 0
     for radius in [None] + list(RADIUS_OPTIONS_KM):
         suffix = "" if radius is None else f"_r{radius}"
         if not ((root / with_suffix(TRIPS_REL, suffix)).exists()
                 and (root / with_suffix(PHOTO_TRIPS_REL, suffix)).exists()):
             skipped.append("default" if radius is None else str(radius))
             continue
-        trips = geocode_pair(root, suffix, photo_rank, photo_date, photo_city_index, gaz,
-                             countries, params)
+        radius_km = DEFAULT_RADIUS_KM if radius is None else radius  # the default pair = R 50
+        trips, missing = geocode_pair(root, suffix, index, finder, countries, params, periods,
+                                      radius_km)
         done.append(radius)
         if radius is None or (default_trips is None and radius == DEFAULT_RADIUS_KM):
-            default_trips = trips  # the default pair wins; r{DEFAULT} stands in if it is missing
+            default_trips, unmatched = trips, missing  # the default pair wins; r50 stands in
 
-    homes_city = geocode_homes(homes, finder)
-    homes_city.to_csv(root / HOMES_CITY_REL, index=False)
     with_city = int((photo_cities["city_id"] != "").sum())
-    return format_report(len(photo_cities), with_city, done, skipped, default_trips, homes_city)
+    return format_report(len(photo_cities), with_city, done, skipped, default_trips, homes_city,
+                         unmatched)
 
 
 def main(argv=None, root=REPO_ROOT):

@@ -363,12 +363,15 @@ class PipelineTests(unittest.TestCase):
         rows = [tuple(r) for r in table[["trip_id", "name", "arrive", "leave",
                                           "photo_count"]].itertuples(index=False)]
         self.assertEqual(rows, [
+            # T1: Alpha (home city) dropped, Gamma (2 photos) below min_city_photos.
             ("trip_20240103", "Beta", "2024-01-01", "2024-01-03", "3"),
-            ("trip_20240103", "Alpha", "2024-01-03", "2024-01-06", "4"),
             ("trip_20240110", "Delta", "2024-01-10", "2024-01-10", "1"),
-            ("trip_20240120", "Alpha", "2024-01-20", "2024-01-21", "2"),
+            # T3: Alpha dropped; Beta (2 photos) is the main outside city.
+            ("trip_20240120", "Beta", "2024-01-22", "2024-01-23", "2"),
             ("trip_20240201", "Gamma", "2024-02-01", "2024-02-03", "3"),
             ("trip_20240201", "Delta", "2024-02-04", "2024-02-06", "3"),
+            # T5: no city near the only photo -> nearest place at any distance.
+            ("trip_20240301", "São Paulo", "2024-03-02", "2024-03-02", "1"),
             ("trip_20240401", "São Paulo", "2024-04-01", "2024-04-03", "3"),
         ])
         first = table.iloc[0]
@@ -388,9 +391,9 @@ class PipelineTests(unittest.TestCase):
             if column != "cities":
                 self.assertEqual(list(trips[column]), list(original[column]), column)
         self.assertEqual(list(trips["cities"]),
-                         ["Beta;Alpha", "Delta", "Alpha", "Gamma;Delta", "", "São Paulo"])
+                         ["Beta", "Delta", "Beta", "Gamma;Delta", "São Paulo", "São Paulo"])
         self.assertEqual(list(trips["title"]),
-                         ["Alpha", "Delta", "Alpha", "Gamma", "", "São Paulo"])
+                         ["Beta", "Delta", "Beta", "Gamma", "Near São Paulo", "São Paulo"])
         self.assertEqual(list(trips["trip_id"]), self.world.trip_ids)
 
     def test_rerun_is_idempotent(self):
@@ -407,8 +410,11 @@ class PipelineTests(unittest.TestCase):
         for radius in segment.RADIUS_OPTIONS_KM:
             trips = self.world.read(f"trips_pred_r{radius}.csv")
             self.assertEqual(list(trips.columns), TRIP_COLUMNS + ["title"])
-            self.assertEqual(list(trips["title"]),
-                             ["Alpha", "Delta", "Alpha", "Gamma", "", "São Paulo"])
+            # Beta is ~111 km from the home city: inside the 200 km circle, outside the others.
+            expected = (["Gamma", "Delta", "Alpha", "Gamma", "Near São Paulo", "São Paulo"]
+                        if radius == 200 else
+                        ["Beta", "Delta", "Beta", "Gamma", "Near São Paulo", "São Paulo"])
+            self.assertEqual(list(trips["title"]), expected, radius)
             cities = self.world.read(f"trip_cities_r{radius}.csv")
             self.assertEqual(list(cities.columns), geocode.TRIP_CITY_COLUMNS)
             self.assertEqual(len(cities), 7)
@@ -421,11 +427,11 @@ class PipelineTests(unittest.TestCase):
             f"GPS photos with a city: {with_city} of {gps}",
             "Radii geocoded: 10, 25, 50, 100, 200 (+ default)",
             "Trips at default radius (50 km): 6",
-            "  2024-01-01 -> 2024-01-07  Beta (US); Alpha (US)",
+            "  2024-01-01 -> 2024-01-07  Beta (US)",
             "  2024-01-10 -> 2024-01-10  Delta (US)",
-            "  2024-01-20 -> 2024-01-23  Alpha (US)",
+            "  2024-01-20 -> 2024-01-23  Beta (US)",
             "  2024-02-01 -> 2024-02-06  Gamma (US); Delta (US)",
-            "  2024-03-01 -> 2024-03-02  no city",
+            "  2024-03-01 -> 2024-03-02  Near São Paulo (BR)",
             "  2024-04-01 -> 2024-04-03  São Paulo (BR)",
             "Home cities:",
             "  2024-01-01 -> 2024-03-31  Alpha (US)",
@@ -533,9 +539,230 @@ class CliTests(unittest.TestCase):
             world = World(tmp)
             run_main(tmp, ["--min_city_photos", "1"])
             trips = world.read("trips_pred.csv")
-            self.assertEqual(trips["cities"].tolist()[0], "Beta;Alpha;Gamma")
+            self.assertEqual(trips["cities"].tolist()[0], "Beta;Gamma")
             run_main(tmp, ["--min_city_photos", "3", "--max_city_km", "1"])
-            self.assertEqual(world.read("trips_pred.csv")["cities"].tolist()[0], "Beta;Alpha")
+            self.assertEqual(world.read("trips_pred.csv")["cities"].tolist()[0], "Beta")
+
+
+# --- home-area filtering (task 6b): a straight line of towns north of an invented home ---------
+
+MINI_HOME = (0.004321, 0.005678)        # sentinel strings: must never be written or printed
+MINI_PHOTO_SENTINEL = (north(0.0, -120), 0.012346)
+HOMEVILLE = (north(0.0, 12), 0.0)       # the home city (home point is ~11.5 km from it)
+SUBURB = (north(0.0, 30), 0.0)
+JUSTIN = (north(0.0, 46), 0.0)          # inside a 50 km circle
+JUSTOUT = (north(0.0, 63), 0.0)         # outside a 50 km circle, inside 100 km
+FARTON = (north(0.0, 130), 0.0)
+SOUTHPORT = (north(0.0, -200), 0.0)
+EDGE = (north(0.0, 45), 0.0)
+MINI_PLACES = [
+    place(1, "Homeville", *HOMEVILLE, pop=1000000),
+    place(2, "Suburb", *SUBURB, pop=50000),
+    place(3, "Justin", *JUSTIN, pop=80000),
+    place(4, "Justout", *JUSTOUT, pop=100000),
+    place(5, "Farton", *FARTON, pop=300000),
+    place(6, "Southport", *SOUTHPORT, pop=20000),
+]
+ONE_HOME = [("2024-01-01", "2024-12-31", MINI_HOME)]
+
+
+def day(n):
+    return f"2024-03-{n:02d}"
+
+
+def build_mini(tmp, visits, trips, homes=None, places=None, radii=(None,)):
+    """Write a repo root. visits: [(trip_id, day, spot)], trips: [(trip_id, start, end)]."""
+    root = Path(tmp)
+    write_geonames(root, MINI_PLACES if places is None else places)
+    photos = Photos()
+    link = []
+    for trip_id, when, spot in visits:
+        link.append((photos.add(when, 9, spot, offset=False), trip_id))
+    processed = root / "data" / "processed"
+    processed.mkdir(parents=True, exist_ok=True)
+    photos.frame().to_csv(processed / "photos_clean.csv", index=False)
+    rows = [{"from_date": a, "to_date": b, "lat": f"{pt[0]:.6f}", "lng": f"{pt[1]:.6f}"}
+            for a, b, pt in (ONE_HOME if homes is None else homes)]
+    pd.DataFrame(rows).to_csv(processed / "homes.csv", index=False)
+    trips_df = pd.DataFrame([trip_row(t, a, b, sum(1 for v in visits if v[0] == t))
+                             for t, a, b in trips], columns=TRIP_COLUMNS)
+    for radius in radii:
+        suffix = "" if radius is None else f"_r{radius}"
+        trips_df.to_csv(processed / f"trips_pred{suffix}.csv", index=False)
+        pd.DataFrame(link, columns=["photo_id", "trip_id"]).to_csv(
+            processed / f"photo_trips{suffix}.csv", index=False)
+    return root
+
+
+def read_processed(root, name):
+    return pd.read_csv(Path(root) / "data" / "processed" / name, dtype=str,
+                       keep_default_na=False, encoding="utf-8")
+
+
+class HomeAreaTests(unittest.TestCase):
+    TRIP = "trip_20240301"
+
+    def visits_all(self):
+        out = [(self.TRIP, day(1), HOMEVILLE), (self.TRIP, day(1), HOMEVILLE)]
+        for n, spot in ((2, SUBURB), (3, SUBURB), (4, SUBURB),
+                        (5, JUSTIN), (6, JUSTIN), (7, JUSTIN),
+                        (8, JUSTOUT), (9, JUSTOUT), (10, JUSTOUT),
+                        (11, FARTON), (12, FARTON), (13, FARTON)):
+            out.append((self.TRIP, day(n), spot))
+        return out
+
+    def test_home_city_and_inside_cities_dropped_and_radius_dependence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_mini(tmp, self.visits_all(), [(self.TRIP, day(1), day(13))],
+                              radii=(None, 10, 50))
+            run_main(tmp)
+            for suffix, cities, title in (
+                    ("", "Justout;Farton", "Justout"),      # default pair = 50 km
+                    ("_r50", "Justout;Farton", "Justout"),
+                    ("_r10", "Suburb;Justin;Justout;Farton", "Suburb")):
+                trips = read_processed(root, f"trips_pred{suffix}.csv")
+                self.assertEqual((trips["cities"].iat[0], trips["title"].iat[0]), (cities, title),
+                                 suffix)
+            # Justin (46 km) is inside 50 km, Justout (63 km) just outside; counts and dates.
+            rows = read_processed(root, "trip_cities.csv")
+            self.assertEqual(rows[["name", "arrive", "leave", "photo_count"]].values.tolist(),
+                             [["Justout", day(8), day(10), "3"], ["Farton", day(11), day(13), "3"]])
+            small = read_processed(root, "trip_cities_r10.csv")
+            self.assertEqual(small["name"].tolist(), ["Suburb", "Justin", "Justout", "Farton"])
+
+    def test_default_pair_uses_default_radius(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_mini(tmp, self.visits_all(), [(self.TRIP, day(1), day(13))],
+                              radii=(None, 25, 50))
+            run_main(tmp)
+            default = read_processed(root, "trips_pred.csv")
+            self.assertEqual(segment.DEFAULT_RADIUS_KM, 50)
+            self.assertEqual(default.to_csv(index=False),
+                             read_processed(root, "trips_pred_r50.csv").to_csv(index=False))
+            self.assertEqual(read_processed(root, "trips_pred_r25.csv")["cities"].iat[0],
+                             "Suburb;Justin;Justout;Farton")
+            self.assertEqual(default["cities"].iat[0], "Justout;Farton")
+
+    def test_fallback_main_outside_city_when_all_are_below_min_photos(self):
+        visits = [(self.TRIP, day(n), HOMEVILLE) for n in (1, 2, 3, 4, 5)]
+        visits += [(self.TRIP, day(6), JUSTOUT), (self.TRIP, day(7), FARTON),
+                   (self.TRIP, day(8), FARTON)]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_mini(tmp, visits, [(self.TRIP, day(1), day(8))])
+            run_main(tmp)
+            trips = read_processed(root, "trips_pred.csv")
+            self.assertEqual((trips["cities"].iat[0], trips["title"].iat[0]), ("Farton", "Farton"))
+            rows = read_processed(root, "trip_cities.csv")
+            self.assertEqual(rows[["name", "arrive", "leave", "photo_count"]].values.tolist(),
+                             [["Farton", day(7), day(8), "2"]])
+
+    def test_fallback_near_nearest_city_to_farthest_outside_photo(self):
+        # Outside photos have no city within max_city_km; the farthest one decides.
+        visits = [(self.TRIP, day(1), HOMEVILLE), (self.TRIP, day(2), HOMEVILLE),
+                  (self.TRIP, day(3), (north(0.0, -80), 0.0)),     # nearest place: Homeville
+                  (self.TRIP, day(4), MINI_PHOTO_SENTINEL)]        # farthest: nearest = Southport
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_mini(tmp, visits, [(self.TRIP, day(1), day(4))])
+            out = run_main(tmp)
+            trips = read_processed(root, "trips_pred.csv")
+            self.assertEqual((trips["cities"].iat[0], trips["title"].iat[0]),
+                             ("Southport", "Near Southport"))
+            rows = read_processed(root, "trip_cities.csv")
+            self.assertEqual(rows.iloc[0].tolist(),
+                             [self.TRIP, "city_southport_us", "Southport", "United States", "US",
+                              f"{SOUTHPORT[0]:.4f}", "0.0000", day(3), day(4), "2"])
+            self.assertIn(f"  {day(1)} -> {day(4)}  Near Southport (US)\n", out)
+
+    def test_fallback_near_when_outside_photos_only_map_to_inside_cities(self):
+        places = [place(1, "Homeville", *HOMEVILLE, pop=1000000),
+                  place(2, "Edge", *EDGE, pop=200000)]
+        outside = north(0.0, 52)    # ~51.5 km from home: outside, yet its city (Edge) is inside
+        visits = [(self.TRIP, day(1), HOMEVILLE), (self.TRIP, day(2), (outside, 0.0)),
+                  (self.TRIP, day(3), (outside, 0.0)), (self.TRIP, day(4), (north(0.0, 49), 0.0))]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_mini(tmp, visits, [(self.TRIP, day(1), day(4))], places=places)
+            run_main(tmp)
+            trips = read_processed(root, "trips_pred.csv")
+            self.assertEqual((trips["cities"].iat[0], trips["title"].iat[0]),
+                             ("Edge", "Near Edge"))
+            rows = read_processed(root, "trip_cities.csv")
+            self.assertEqual(rows[["name", "arrive", "leave", "photo_count"]].values.tolist(),
+                             [["Edge", day(2), day(3), "2"]])
+
+    def test_fallback_home_city_when_nothing_is_outside(self):
+        visits = [(self.TRIP, day(1), HOMEVILLE), (self.TRIP, day(2), HOMEVILLE),
+                  (self.TRIP, day(3), SUBURB), (self.TRIP, day(4), JUSTIN),
+                  ("trip_20240320", day(20), None)]
+        trips = [(self.TRIP, day(1), day(4)), ("trip_20240320", day(20), day(21)),
+                 ("trip_20240325", day(25), day(26))]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_mini(tmp, visits, trips)
+            run_main(tmp)
+            table = read_processed(root, "trips_pred.csv")
+            self.assertEqual(table["cities"].tolist(), ["Homeville", "Homeville", "Homeville"])
+            self.assertEqual(table["title"].tolist(), ["Homeville", "Homeville", "Homeville"])
+            rows = read_processed(root, "trip_cities.csv")
+            self.assertEqual(rows[["trip_id", "arrive", "leave", "photo_count"]].values.tolist(),
+                             [[self.TRIP, day(1), day(2), "2"],
+                              ["trip_20240320", day(20), day(21), "0"],
+                              ["trip_20240325", day(25), day(26), "0"]])
+
+    def test_no_city_at_all_when_home_has_no_city_and_nothing_is_outside(self):
+        far_home = [("2024-01-01", "2024-12-31", (60.123456, 60.654321))]
+        visits = [(self.TRIP, day(1), (60.123456, 60.654321))]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_mini(tmp, visits, [(self.TRIP, day(1), day(2))], homes=far_home)
+            out = run_main(tmp)
+            table = read_processed(root, "trips_pred.csv")
+            self.assertEqual((table["cities"].iat[0], table["title"].iat[0]), ("", ""))
+            self.assertEqual(len(read_processed(root, "trip_cities.csv")), 0)
+            self.assertIn(f"  {day(1)} -> {day(2)}  no city\n", out)
+
+    def test_each_trip_uses_its_own_home_period(self):
+        other = (north(0.0, 130), 0.003456)                    # home point next to Farton
+        homes = [("2024-01-01", "2024-03-15", MINI_HOME), ("2024-03-16", "2024-12-31", other)]
+        visits = [("trip_a", day(1), FARTON), ("trip_a", day(2), FARTON),
+                  ("trip_a", day(3), FARTON), ("trip_a", day(4), HOMEVILLE),
+                  ("trip_a", day(5), HOMEVILLE), ("trip_a", day(6), HOMEVILLE),
+                  ("trip_b", day(20), FARTON), ("trip_b", day(21), FARTON),
+                  ("trip_b", day(22), FARTON), ("trip_b", day(23), HOMEVILLE),
+                  ("trip_b", day(24), HOMEVILLE), ("trip_b", day(25), HOMEVILLE)]
+        trips = [("trip_a", day(1), day(6)), ("trip_b", day(20), day(25))]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_mini(tmp, visits, trips, homes=homes)
+            run_main(tmp)
+            table = read_processed(root, "trips_pred.csv")
+            self.assertEqual(table["cities"].tolist(), ["Farton", "Homeville"])
+            self.assertEqual(table["title"].tolist(), ["Farton", "Homeville"])
+            homes_city = read_processed(root, "homes_city.csv")
+            self.assertEqual(homes_city["name"].tolist(), ["Homeville", "Farton"])
+
+    def test_trip_without_home_period_is_not_filtered_and_is_counted(self):
+        homes = [("2024-03-10", "2024-12-31", MINI_HOME)]       # March 1-9 has no home period
+        visits = [("trip_a", day(1), HOMEVILLE), ("trip_a", day(2), HOMEVILLE),
+                  ("trip_a", day(3), HOMEVILLE), ("trip_a", day(4), FARTON),
+                  ("trip_a", day(5), FARTON), ("trip_a", day(6), FARTON)]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = build_mini(tmp, visits, [("trip_a", day(1), day(6))], homes=homes)
+            out = run_main(tmp)
+            table = read_processed(root, "trips_pred.csv")
+            self.assertEqual((table["cities"].iat[0], table["title"].iat[0]),
+                             ("Homeville;Farton", "Homeville"))
+            self.assertIn("Trips without a home period (not filtered): 1\n", out)
+            self.assertIn("  2024-03-01 -> 2024-03-06  Homeville (US); Farton (US)\n", out)
+
+    def test_privacy_no_home_point_or_photo_coordinates_anywhere(self):
+        visits = self.visits_all() + [(self.TRIP, day(14), MINI_PHOTO_SENTINEL)]
+        with tempfile.TemporaryDirectory() as tmp:
+            build_mini(tmp, visits, [(self.TRIP, day(1), day(14))], radii=(None, 10, 50))
+            out = run_main(tmp)
+            texts = [out]
+            for name in ("trips_pred.csv", "trips_pred_r10.csv", "trip_cities.csv",
+                         "trip_cities_r10.csv", "homes_city.csv", "photo_cities.csv"):
+                texts.append((Path(tmp) / "data" / "processed" / name).read_text(encoding="utf-8"))
+            for text in texts:
+                for sentinel in ("0.004321", "0.005678", "0.012346"):
+                    self.assertNotIn(sentinel, text)
 
 
 if __name__ == "__main__":
