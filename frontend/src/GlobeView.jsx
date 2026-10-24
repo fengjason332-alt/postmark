@@ -22,10 +22,11 @@ const LOOK = {
   gouache: { halo: '#c9cdd0', haloSize: 0.13, alpha: ['f4', 'dd'], stroke: 0.55, fog: 1.1 },
 }
 
-// Fog and blur fade out as the camera comes in: thick at the default view, gone by altitude ~0.9.
+// Fog and blur only appear when the camera is pulled far back: clear at the default view
+// and closer, thickening from altitude 2.6 to the zoom-out limit (~5).
 function applyFog(el, altitude, style) {
   if (!el) return // the camera can report in before the wrapper is mounted
-  const t = Math.max(0, Math.min(1, (altitude - 0.9) / 2.2))
+  const t = Math.max(0, Math.min(1, (altitude - 2.6) / 2.4))
   const strength = LOOK[style].fog
   el.style.setProperty('--fog-blur', `${(t * 2.6 * strength).toFixed(2)}px`)
   el.style.setProperty('--fog-wash', (t * 0.55 * strength).toFixed(3))
