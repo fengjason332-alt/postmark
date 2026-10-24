@@ -1,1 +1,6 @@
 pillow
+pillow-heif
+pandas
+numpy
+scikit-learn
+matplotlib
