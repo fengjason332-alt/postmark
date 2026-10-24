@@ -233,6 +233,8 @@ City database / 城市数据库：`cities15000.zip` from https://download.geonam
 - The "travel persona" is playful text, not a personality judgment. No leaderboards.
   "旅行人格"只是好玩的描述；不做排行榜。
 - Credit data sources in the README and Devpost: GeoNames (CC BY 4.0), CLIP (MIT).
+- Jason may share a coarse copy (2-decimal coordinates, no file names) privately with the data science teammate; it must not be committed or posted, and is deleted after the event. Transfer it directly (e.g. AirDrop or USB), not through cloud or chat services.
+  Jason 可以私下给数据科学队友一份粗略副本（坐标保留 2 位小数，不含文件名）；不能提交到 Git、不能发布，比赛结束后删除。请直接传输（如 AirDrop 或 U 盘），不要通过云盘或聊天软件。
 
 ## 9. Scope / 范围
 
