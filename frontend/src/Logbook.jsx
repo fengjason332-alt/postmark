@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { shortDate, dateRange, jitter, photosByDay, tripColor } from './data.js'
 import { postmark } from './stamps.js'
 import { citiesOf } from './data.js'
@@ -86,10 +86,19 @@ function RouteSketch({ photos, color }) {
   )
 }
 
-// Photos are shown as small paintings made from them on this device.
-export function Picture({ src, alt, ...rest }) {
-  const painted = usePainting(src)
-  return painted ? <img src={painted} alt={alt} {...rest} /> : <span className="painting-wait" role="img" aria-label={alt} />
+// Photos are shown as small paintings made from them on this device. A photo is only
+// loaded and painted once it is about to scroll into view.
+export function Picture({ src, alt, loading, ...rest }) {
+  const [near, setNear] = useState(loading !== 'lazy')
+  const holder = useRef(null)
+  useEffect(() => {
+    if (near || !holder.current) return undefined
+    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), { rootMargin: '300px' })
+    io.observe(holder.current)
+    return () => io.disconnect()
+  }, [near])
+  const painted = usePainting(src, near)
+  return painted ? <img src={painted} alt={alt} {...rest} /> : <span ref={holder} className="painting-wait" role="img" aria-label={alt} />
 }
 
 // The photo on top and the painting made from it below, like a page from a sketchbook.

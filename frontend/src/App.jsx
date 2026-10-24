@@ -133,7 +133,7 @@ export default function App() {
         <p className="sentence">{sentence(range, stats)}</p>
         <p className="home-line">
           <span className="seal-dot" /> Home is {home.city}
-          <button className="link change-home" onClick={() => setHomeOpen((o) => !o)}>change</button>
+          <button className="link change-home" onClick={() => { setHomeOpen((o) => !o); setPicking(false) }}>change</button>
           {persona && <> · Travel persona: {persona}<span className="aside"> (just for fun)</span></>}
         </p>
         {homeOpen && (

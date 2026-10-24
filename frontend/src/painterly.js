@@ -14,13 +14,15 @@ export function paint(src) {
 }
 
 // React helper: the painted data URL, or null while it is still being made.
-export function usePainting(src) {
+// Pass enabled=false to hold off (e.g. until the photo scrolls into view).
+export function usePainting(src, enabled = true) {
   const [url, setUrl] = useState(null)
   useEffect(() => {
+    if (!enabled) return undefined
     let live = true
     paint(src).then((u) => live && setUrl(u)).catch(() => live && setUrl(src))
     return () => { live = false }
-  }, [src])
+  }, [src, enabled])
   return url
 }
 
