@@ -1,4 +1,4 @@
-// The 3D globe: home seal, ink arcs drawn one by one, city postmarks, and detail
+// The 3D globe: home seal, trip lines drawn one by one, city stamps, and detail
 // (borders, city names, clearing fog) that appears as you zoom in.
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import Globe from 'react-globe.gl'
@@ -29,6 +29,7 @@ const GlobeView = forwardRef(function GlobeView(
 ) {
   const globe = useRef()
   const wrap = useRef()
+  const overlay = useRef()
   const borders = useRef(null)
   const [size, setSize] = useState({ width: window.innerWidth, height: window.innerHeight })
   const [tick, setTick] = useState(0) // bumps every frame while lines are being drawn
@@ -93,11 +94,12 @@ const GlobeView = forwardRef(function GlobeView(
     })
   }
 
-  // Called on every camera change (including auto-rotation), so it only touches the DOM
-  // directly and re-renders labels when the view has moved enough to matter.
+  // Called on every camera change (including auto-rotation): fog, borders and pin
+  // positions are updated directly; labels re-render only when the view moved enough.
   function onView(pov) {
     applyFog(wrap.current, pov.altitude)
     borders.current?.setAltitude(pov.altitude)
+    layoutPins()
     if (!cities.current) return
     const last = lastLabelPov.current
     const moved = !last || Math.abs(last.altitude - pov.altitude) > 0.08 || angularDistance(last, pov) > 4 + pov.altitude * 6
@@ -106,23 +108,26 @@ const GlobeView = forwardRef(function GlobeView(
     setLabels(visibleCities(cities.current, pov))
   }
 
-  // Arcs: home -> first city -> next city ... one chain per trip, in time order.
+  // Arcs per trip, in visit order: home -> first city -> ... -> last city -> home.
+  // Each leg has a solid line that writes itself once, plus a "flow" twin whose short
+  // dashes keep travelling along it, so the direction of the journey stays readable.
   const arcs = useMemo(() => {
     const now = performance.now()
     const next = new Map()
     const homeKey = `${home.lat},${home.lng}`
     let newTrips = 0
     for (const trip of trips) {
-      const stops = [home, ...trip.cities]
+      const stops = [home, ...trip.cities, home]
       const fresh = !arcCache.current.has(`${homeKey}:${trip.id}:0`)
       const delay = fresh ? newTrips++ * STAGGER_MS : 0
       for (let i = 0; i < stops.length - 1; i++) {
         const key = `${homeKey}:${trip.id}:${i}`
         next.set(key, arcCache.current.get(key) ?? {
-          key, trip,
+          key, trip, leg: i, homeward: i === stops.length - 2,
           // Dashes grow from the arc's end, so start/end are swapped to write outward from home.
           from: stops[i + 1], to: stops[i],
           born: now + delay + i * DRAW_MS * 0.8, gap: 1,
+          flow: { key: `${key}:flow`, trip, flow: true, from: stops[i], to: stops[i + 1] },
         })
       }
     }
@@ -130,7 +135,8 @@ const GlobeView = forwardRef(function GlobeView(
     return [...next.values()]
   }, [trips, home])
 
-  // Postmarks land when the first ink line reaching them is finished.
+  // Stamps land when the first line reaching them is finished. Each sits just above a
+  // small dot on the city's exact position, so the lines visibly meet the right spot.
   const markers = useMemo(() => {
     const now = performance.now()
     const visited = citiesOf(trips)
@@ -138,17 +144,20 @@ const GlobeView = forwardRef(function GlobeView(
     const next = new Map()
     for (const city of visited) {
       const first = city.visits[0].trip
-      const px = Math.round(38 + 42 * Math.sqrt(city.photo_count / maxCount))
-      const signature = `${city.visits.length}:${px}`
+      const px = Math.round(34 + 30 * Math.sqrt(city.photo_count / maxCount))
+      // Stop number within its first trip, shown when that trip visits several cities.
+      const stop = first.cities.length > 1 ? first.cities.findIndex((c) => c.id === city.id) + 1 : 0
+      const signature = `${city.visits.length}:${px}:${stop}`
       let d = stampCache.current.get(city.id)
       if (!d || d.signature !== signature) {
-        // The outer element is positioned by globe.gl; the inner button does the stamping animation.
         const el = document.createElement('div')
-        el.className = 'marker'
+        el.className = 'pin stamp'
+        el.style.setProperty('--size', `${px}px`)
+        el.style.setProperty('--trip', tripColor(first))
+        el.innerHTML = `<i class="pin-dot"></i>`
         const button = document.createElement('button')
         button.className = 'postmark'
-        button.style.setProperty('--size', `${px}px`)
-        button.innerHTML = postmark(city, tripColor(first))
+        button.innerHTML = postmark(city, tripColor(first)) + (stop ? `<b class="stop-no">${stop}</b>` : '')
         button.addEventListener('click', (e) => {
           e.stopPropagation()
           handlers.current.onCityClick(el._city)
@@ -156,7 +165,7 @@ const GlobeView = forwardRef(function GlobeView(
         el.appendChild(button)
         const arc = arcs.find((a) => a.trip.id === first.id && a.from.id === city.id)
         button.style.animationDelay = `${arc ? Math.max(0, arc.born - now + DRAW_MS * 0.85) : 0}ms`
-        d = { id: city.id, lat: city.lat, lng: city.lng, el, signature }
+        d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7 }
       }
       d.el._city = city
       next.set(city.id, d)
@@ -167,10 +176,10 @@ const GlobeView = forwardRef(function GlobeView(
 
   const seal = useMemo(() => {
     const el = document.createElement('div')
-    el.className = 'marker seal'
+    el.className = 'pin seal'
     el.title = `Home · ${home.city}`
-    el.innerHTML = homeSeal(home.city)
-    return { id: 'home', lat: home.lat, lng: home.lng, el }
+    el.innerHTML = `<i class="pin-dot"></i><div class="seal-art">${homeSeal(home.city)}</div>`
+    return { key: 'home', lat: home.lat, lng: home.lng, el, kind: 'seal', rank: 2e9, w: 46, h: 30 }
   }, [home])
 
   // Small map labels for nearby cities; visited cities already have a stamp, so skip them.
@@ -183,14 +192,63 @@ const GlobeView = forwardRef(function GlobeView(
         let d = labelCache.current.get(key)
         if (!d) {
           const el = document.createElement('div')
-          el.className = `marker city-label ${c.population >= 2e6 ? 'major' : ''}`
+          el.className = `pin city-label ${c.population >= 2e6 ? 'major' : ''}`
           el.innerHTML = `<i></i><span>${c.name}</span>`
-          d = { id: key, lat: c.lat, lng: c.lng, el }
+          const font = c.population >= 2e6 ? 8.2 : 7.2 // rough width per character, in px
+          d = { key, lat: c.lat, lng: c.lng, el, kind: 'label', rank: c.population, w: 10 + c.name.length * font, h: 16 }
           labelCache.current.set(key, d)
         }
         return d
       })
   }, [labels, markers, home])
+
+  // Pins live in our own layer on top of the canvas. Elements are added once and then
+  // only moved, so stamps never re-mount (which used to replay their animation and flicker).
+  const pins = useMemo(() => [seal, ...markers, ...labelData], [seal, markers, labelData])
+  const pinsRef = useRef(pins)
+  pinsRef.current = pins
+  useEffect(() => {
+    const layer = overlay.current
+    const keep = new Set(pins.map((p) => p.el))
+    for (const el of [...layer.children]) if (!keep.has(el)) el.remove()
+    for (const p of pins) if (p.el.parentNode !== layer) layer.appendChild(p.el)
+    layoutPins()
+  }, [pins]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => layoutPins(), [size]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Position every pin, hide the ones on the far side, and declutter: higher-ranked pins
+  // (home, then stamps by photos, then labels by population) claim space first; a stamp
+  // that would overlap shrinks to its dot, and an overlapping label is hidden.
+  function layoutPins() {
+    const g = globe.current
+    if (!g || !overlay.current) return
+    const cam = g.camera().position
+    const radius = g.getGlobeRadius()
+    const placed = []
+    const hits = (r) => placed.some((q) => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h)
+    const sorted = [...pinsRef.current].sort((a, b) => b.rank - a.rank)
+    for (const p of sorted) {
+      const c = g.getCoords(p.lat, p.lng, 0)
+      const facing = (c.x * cam.x + c.y * cam.y + c.z * cam.z) / radius
+      const visible = facing > radius * 1.04 // a little margin so pins fade before the rim
+      p.el.classList.toggle('behind', !visible)
+      if (!visible) continue
+      const s = g.getScreenCoords(p.lat, p.lng, 0)
+      p.el.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px)`
+      if (p.kind === 'label') {
+        const r = { x: s.x - 3, y: s.y - p.h / 2, w: p.w, h: p.h }
+        const crowded = hits(r)
+        p.el.classList.toggle('crowded', crowded)
+        if (!crowded) placed.push(r)
+      } else {
+        const r = { x: s.x - p.w / 2, y: s.y - p.h - 8, w: p.w, h: p.h + 8 }
+        const crowded = p.kind === 'stamp' && hits(r)
+        p.el.classList.toggle('mini', crowded)
+        placed.push(crowded ? { x: s.x - 5, y: s.y - 5, w: 10, h: 10 } : r)
+      }
+    }
+  }
 
   // Ease each arc's dash offset from 1 (hidden) to 0 (fully drawn), then stop ticking.
   useEffect(() => {
@@ -210,8 +268,13 @@ const GlobeView = forwardRef(function GlobeView(
     return () => cancelAnimationFrame(raf)
   }, [arcs])
 
+  // Flow dashes join each leg once its line has been written.
+  const arcData = useMemo(
+    () => [...arcs, ...arcs.filter((a) => a.gap === 0).map((a) => a.flow)],
+    [arcs, tick], // eslint-disable-line react-hooks/exhaustive-deps
+  )
   // A new accessor identity each tick tells react-globe.gl to re-read the gaps.
-  const dashGap = useMemo(() => (d) => d.gap, [tick]) // eslint-disable-line react-hooks/exhaustive-deps
+  const dashGap = useMemo(() => (d) => (d.flow ? 0 : d.gap), [tick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={`globe ${picking ? 'picking' : ''}`} ref={wrap}>
@@ -229,28 +292,23 @@ const GlobeView = forwardRef(function GlobeView(
         showAtmosphere
         atmosphereColor="#c9cdd0"
         atmosphereAltitude={0.13}
-        arcsData={arcs}
+        arcsData={arcData}
         arcStartLat={(d) => d.from.lat}
         arcStartLng={(d) => d.from.lng}
         arcEndLat={(d) => d.to.lat}
         arcEndLng={(d) => d.to.lng}
-        arcColor={(d) => [tripColor(d.trip) + 'f4', tripColor(d.trip) + 'dd']}
-        arcStroke={0.55}
+        arcColor={(d) => (d.flow ? ['#f6f0e4ee', '#f6f0e4ee'] : d.homeward ? [tripColor(d.trip) + '99', tripColor(d.trip) + '99'] : [tripColor(d.trip) + 'f4', tripColor(d.trip) + 'dd'])}
+        arcStroke={(d) => (d.flow ? 0.3 : 0.55)}
         arcAltitudeAutoScale={0.32}
-        arcDashLength={1}
-        arcDashGap={2}
+        arcDashLength={(d) => (d.flow ? 0.04 : 1)}
+        arcDashGap={(d) => (d.flow ? 0.3 : 2)}
         arcDashInitialGap={dashGap}
+        arcDashAnimateTime={(d) => (d.flow ? 2600 : 0)}
         arcsTransitionDuration={0}
         arcLabel={(d) => `${d.trip.title} · ${d.trip.start_date}`}
         onArcClick={(d) => onTripClick(d.trip)}
-        htmlElementsData={[...labelData, seal, ...markers]}
-        htmlLat={(d) => d.lat}
-        htmlLng={(d) => d.lng}
-        htmlAltitude={0.004}
-        htmlTransitionDuration={0}
-        htmlElement={(d) => d.el}
-        htmlElementVisibilityModifier={(el, visible) => el.classList.toggle('behind', !visible)}
       />
+      <div className="pins" ref={overlay} />
     </div>
   )
 })

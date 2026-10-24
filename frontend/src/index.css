@@ -72,17 +72,34 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .seal-dot { width: 10px; height: 10px; background: var(--vermilion); border-radius: 2px; display: inline-block; }
 .aside { font-size: 12px; opacity: 0.8; }
 
-/* ---------- markers on the globe ---------- */
-.marker { pointer-events: auto; transition: opacity 0.4s; }
-.marker.behind { opacity: 0; pointer-events: none; }
-.seal { width: 30px; height: 30px; z-index: 2; }
+/* ---------- pins on the globe (positioned by GlobeView) ---------- */
+.pins { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.pin { position: absolute; left: 0; top: 0; width: 0; height: 0; transition: opacity 0.3s; will-change: transform; }
+.pin.behind { opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0s 0.3s; }
+.pin-dot {
+  position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--trip, var(--vermilion)); box-shadow: 0 0 0 2px rgba(246, 242, 234, 0.9);
+}
+/* The stamp sits just above its dot; when crowded it folds away and only the dot stays. */
+.stamp .postmark, .seal .seal-art {
+  position: absolute; left: 0; bottom: 8px; transform: translateX(-50%); transform-origin: 50% 100%;
+  pointer-events: auto; transition: transform 0.25s, opacity 0.25s;
+}
+.stamp.mini .postmark { transform: translateX(-50%) scale(0.2); opacity: 0; pointer-events: none; }
+.stamp.mini .pin-dot { pointer-events: auto; }
+.seal .seal-art { width: 46px; height: 46px; bottom: 2px; }
+.stop-no {
+  position: absolute; top: 4px; left: -2px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: #f6f2ea; color: var(--trip); box-shadow: 0 0 0 1.5px var(--trip);
+  font: italic 700 11px/17px var(--serif); text-align: center;
+}
 .seal-svg { width: 100%; height: 100%; display: block; transform: rotate(-6deg); filter: drop-shadow(0 1px 1px rgba(80, 20, 10, 0.25)); }
 
 .postmark {
   width: var(--size); height: var(--size);
   display: block; border: 0; padding: 0; background: none;
-  animation: stamp 0.55s cubic-bezier(0.3, 1.6, 0.5, 1) both;
 }
+.postmark-svg { animation: stamp 0.55s cubic-bezier(0.3, 1.6, 0.5, 1) both; animation-delay: inherit; }
 .postmark-svg { width: 100%; height: 100%; display: block; mix-blend-mode: multiply; }
 .postmark:hover .postmark-svg, .postmark:focus-visible .postmark-svg { transform: scale(1.08); transition: transform 0.25s; }
 @keyframes stamp {
@@ -234,14 +251,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ---------- city names (appear when zoomed in) ---------- */
 .city-label {
-  display: flex; align-items: center; gap: 4px; pointer-events: none;
+  pointer-events: none;
   font-family: var(--serif); font-size: 11px; letter-spacing: 0.3px; color: var(--ink-soft);
-  white-space: nowrap; transform: translateX(50%);
   text-shadow: 0 0 3px var(--paper), 0 0 2px var(--paper);
 }
-.city-label i { width: 4px; height: 4px; border-radius: 50%; background: var(--ink-soft); flex: none; }
+.city-label i { position: absolute; left: -2px; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: var(--ink-soft); }
+.city-label span { position: absolute; left: 5px; top: 0; transform: translateY(-52%); white-space: nowrap; }
 .city-label.major { font-size: 13px; color: var(--ink); }
-.city-label.behind { opacity: 0; }
+.city-label.crowded { opacity: 0; }
 
 /* ---------- home picker ---------- */
 .change-home { font-size: 13px; color: var(--vermilion); margin-left: 2px; }
@@ -285,7 +302,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 :root .sentence { font-family: var(--serif); font-size: 19px; line-height: 1.5; }
 :root .range { background: rgba(246, 242, 234, 0.8); }
 :root .tick span { font-style: italic; font-size: 18px; }
-:root .seal { width: 46px; height: 46px; }
 :root .seal-svg { transform: none; filter: drop-shadow(0 1px 1px rgba(40, 40, 50, 0.18)); }
 :root .city-label { font-family: var(--serif); font-style: italic; font-size: 13px; }
 :root .city-label.major { font-size: 15px; }
