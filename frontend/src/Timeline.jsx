@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { dotDate, tripColor, tripDrawMs } from './data.js'
-
-const DAY = 86400000
-const toDay = (iso) => Math.round(new Date(iso + 'T00:00:00Z').getTime() / DAY)
-const fromDay = (n) => new Date(n * DAY).toISOString().slice(0, 10)
+import { DRAW_MS, PAUSE_MS, dayNumber, dotDate, isoDay, legTimes, tripColor } from './data.js'
 
 // Bottom timeline: drag to replay trips in order, or press play to watch them unfold one by one.
+// The cursor is a point on the day clock (fractional days); the globe draws every leg that
+// has set off by then, so the bar and the lines always show the same moment.
 export default function Timeline({ trips, cursor, onCursor, onOpen, onPlaying }) {
   const [playing, setPlayingState] = useState(false)
   const setPlaying = (p) => {
@@ -16,10 +14,10 @@ export default function Timeline({ trips, cursor, onCursor, onOpen, onPlaying })
   const timer = useRef(0)
   if (!trips.length) return <div className="timeline empty" />
 
-  const min = toDay(trips[0].start_date) - 3
-  const max = toDay(trips[trips.length - 1].end_date) + 3
-  const value = cursor ? toDay(cursor) : max
-  const pct = (iso) => ((toDay(iso) - min) / (max - min)) * 100
+  const min = dayNumber(trips[0].start_date) - 3
+  const max = dayNumber(trips[trips.length - 1].end_date) + 3
+  const value = cursor ?? max
+  const pct = (iso) => ((dayNumber(iso) - min) / (max - min)) * 100
 
   return (
     <div className="timeline">
@@ -31,7 +29,7 @@ export default function Timeline({ trips, cursor, onCursor, onOpen, onPlaying })
           {trips.map((t) => (
             <button
               key={t.id}
-              className={`tick ${toDay(t.start_date) <= value ? 'on' : ''}`}
+              className={`tick ${legTimes(t)[0].depart <= value ? 'on' : ''}`}
               style={{ left: `${pct(t.start_date)}%`, '--c': tripColor(t), '--shift': `${-pct(t.start_date)}%` }}
               onClick={() => onOpen(t)}
               title={`${t.title} · ${dotDate(t.start_date)}`}
@@ -44,17 +42,18 @@ export default function Timeline({ trips, cursor, onCursor, onOpen, onPlaying })
           type="range"
           min={min}
           max={max}
+          step="any"
           value={value}
           onChange={(e) => {
             setPlaying(false)
             const v = +e.target.value
-            onCursor(v >= max ? null : fromDay(v))
+            onCursor(v >= max ? null : v)
           }}
           aria-label="Timeline"
         />
         <div className="ends">
           <span>{dotDate(trips[0].start_date)}</span>
-          <span className="now">{cursor ? dotDate(cursor) : 'today'}</span>
+          <span className="now">{cursor === null ? 'today' : dotDate(isoDay(cursor))}</span>
           <span>{dotDate(trips[trips.length - 1].end_date)}</span>
         </div>
       </div>
@@ -63,26 +62,29 @@ export default function Timeline({ trips, cursor, onCursor, onOpen, onPlaying })
   )
 }
 
-// Runs the replay in date order: the cursor walks the real calendar, stopping on each
-// trip for as long as its lines take to draw (the globe follows them), then moves on.
+// Runs the replay on the same clock the globe uses: the cursor walks the calendar to each
+// trip, then moves through every leg exactly while that leg draws, rests while the stamp
+// lands, and sets off again. The camera follows each leg as it starts.
 const GAP_MS = 1400 // time spent travelling the calendar between two trips
 
 function Player({ playing, trips, min, max, onCursor, onDone, timer }) {
   useEffect(() => {
     if (!playing) return
-    // Segments of [fromDay, toDay, durationMs]: the gap before each trip, then the trip itself.
+    // Segments of [fromDay, toDay, durationMs].
     const segments = []
     let day = min
     for (const t of trips) {
-      const s = toDay(t.start_date)
-      const e = toDay(t.end_date)
-      segments.push([day, s, GAP_MS], [s, e, tripDrawMs(t)])
-      day = e
+      const legs = legTimes(t)
+      segments.push([day, legs[0].depart, GAP_MS])
+      legs.forEach((leg, i) => {
+        segments.push([leg.depart, leg.arrive, DRAW_MS])
+        segments.push([leg.arrive, legs[i + 1]?.depart ?? leg.arrive, PAUSE_MS])
+      })
+      day = legs[legs.length - 1].arrive
     }
     segments.push([day, max, GAP_MS])
     const total = segments.reduce((sum, seg) => sum + seg[2], 0)
     const start = performance.now()
-    let shown = null
     const step = () => {
       let elapsed = performance.now() - start
       if (elapsed >= total) {
@@ -95,11 +97,10 @@ function Player({ playing, trips, min, max, onCursor, onDone, timer }) {
         if (elapsed < seg[2]) break
         elapsed -= seg[2]
       }
-      const iso = fromDay(Math.round(seg[0] + (seg[1] - seg[0]) * Math.min(1, elapsed / seg[2])))
-      if (iso !== shown) onCursor((shown = iso))
+      onCursor(seg[0] + (seg[1] - seg[0]) * Math.min(1, elapsed / seg[2]))
       timer.current = requestAnimationFrame(step)
     }
-    onCursor(fromDay(min))
+    onCursor(min)
     timer.current = requestAnimationFrame(step)
     return () => cancelAnimationFrame(timer.current)
   }, [playing]) // eslint-disable-line react-hooks/exhaustive-deps

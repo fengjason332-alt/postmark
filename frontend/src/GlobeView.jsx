@@ -25,7 +25,7 @@ function applyFog(el, altitude) {
 }
 
 const GlobeView = forwardRef(function GlobeView(
-  { trips, home, follow, picking, onPick, onTripClick, onCityClick },
+  { trips, legsShown, home, follow, picking, onPick, onTripClick, onCityClick },
   ref,
 ) {
   const globe = useRef()
@@ -123,30 +123,34 @@ const GlobeView = forwardRef(function GlobeView(
   }
 
   // Arcs per trip, in visit order: home -> first city -> ... -> last city -> home.
-  // Legs draw one after another (pausing at each city), and new trips queue behind each other.
+  // Only legs that have set off on the timeline are shown. A leg appearing for the first
+  // time draws now; several appearing at once (dragging the bar) queue one after another.
   const arcs = useMemo(() => {
     const now = performance.now()
     const next = new Map()
     const homeKey = `${home.lat},${home.lng}`
-    let queue = 0 // when the next newly shown trip may start drawing
+    let queue = 0 // when the next new leg may start drawing
     for (const trip of trips) {
       const stops = [home, ...trip.cities, home]
-      const fresh = !arcCache.current.has(`${homeKey}:${trip.id}:0`)
-      const delay = fresh ? queue : 0
-      if (fresh) queue += (stops.length - 1) * (DRAW_MS + PAUSE_MS)
-      for (let i = 0; i < stops.length - 1; i++) {
+      const count = Math.min(stops.length - 1, legsShown?.[trip.id] ?? stops.length - 1)
+      for (let i = 0; i < count; i++) {
         const key = `${homeKey}:${trip.id}:${i}`
-        next.set(key, arcCache.current.get(key) ?? {
-          key, trip, leg: i, homeward: i === stops.length - 2,
-          // three-globe reveals a dash from the arc's start, so each leg grows from where it leaves.
-          from: stops[i], to: stops[i + 1],
-          born: now + delay + i * (DRAW_MS + PAUSE_MS), gap: 1,
-        })
+        let a = arcCache.current.get(key)
+        if (!a) {
+          a = {
+            key, trip, leg: i, homeward: i === stops.length - 2,
+            // three-globe reveals a dash from the arc's start, so each leg grows from where it leaves.
+            from: stops[i], to: stops[i + 1],
+            born: now + queue, gap: 1,
+          }
+          queue += DRAW_MS + PAUSE_MS
+        }
+        next.set(key, a)
       }
     }
     arcCache.current = next
     return [...next.values()]
-  }, [trips, home])
+  }, [trips, legsShown, home])
 
   // Stamps land when the first line reaching them is finished. Each sits just above a
   // small dot on the city's exact position, so the lines visibly meet the right spot.
@@ -157,6 +161,9 @@ const GlobeView = forwardRef(function GlobeView(
     const next = new Map()
     for (const city of visited) {
       const first = city.visits[0].trip
+      // A stamp only appears once a line on the globe is heading for it.
+      const arc = arcs.find((a) => a.trip.id === first.id && a.to.id === city.id)
+      if (!arc) continue
       const px = Math.round(34 + 30 * Math.sqrt(city.photo_count / maxCount))
       // Stop number within its first trip, shown when that trip visits several cities.
       const stop = first.cities.length > 1 ? first.cities.findIndex((c) => c.id === city.id) + 1 : 0
@@ -178,8 +185,7 @@ const GlobeView = forwardRef(function GlobeView(
         })
         el.appendChild(button)
         // The dot, stamp and stop number all land when the first line reaching the city arrives.
-        const arc = arcs.find((a) => a.trip.id === first.id && a.to.id === city.id)
-        el.style.setProperty('--land', `${arc ? Math.max(0, arc.born - now + DRAW_MS * 0.9) : 0}ms`)
+        el.style.setProperty('--land', `${Math.max(0, arc.born - now + DRAW_MS * 0.9)}ms`)
         d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7 }
       }
       d.el._city = city

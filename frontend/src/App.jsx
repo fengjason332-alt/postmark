@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import GlobeView from './GlobeView.jsx'
-import { filterTrips, loadData, sentence, summarize, thisYear, withHome } from './data.js'
+import { filterTrips, legTimes, loadData, sentence, summarize, thisYear, withHome } from './data.js'
 import { loadCities, nearestCity } from './geoLayers.js'
 import { PAINT_FILTER } from './stamps.js'
 import Logbook from './Logbook.jsx'
@@ -37,7 +37,7 @@ export default function App() {
   const [customHome, setCustomHome] = useState(savedHome)
   const [homeOpen, setHomeOpen] = useState(false)
   const [picking, setPicking] = useState(false)
-  const [cursor, setCursor] = useState(null) // ISO date; trips starting after it are hidden
+  const [cursor, setCursor] = useState(null) // point on the day clock; legs leaving after it are hidden
   const [playing, setPlaying] = useState(false) // timeline replay running: the globe follows the lines
   const [trip, setTrip] = useState(null)
   const [city, setCity] = useState(null)
@@ -55,9 +55,17 @@ export default function App() {
 
   const inRange = useMemo(() => filterTrips(allTrips, range === 'year' ? thisYear() : 'all'), [allTrips, range])
 
-  // Only hand the globe a new list when the set of visible trips changes, not on every timeline tick.
-  const visibleKey = inRange.filter((t) => !cursor || t.start_date <= cursor).map((t) => t.id).join('|')
-  const visible = useMemo(() => inRange.filter((t) => visibleKey.split('|').includes(t.id)), [inRange, visibleKey])
+  // How many legs of each trip have set off by the cursor. The globe only gets a new list
+  // when that changes (a leg departs), not on every timeline tick.
+  const legKey = inRange
+    .map((t) => [t.id, cursor === null ? t.cities.length + 1 : legTimes(t).filter((l) => l.depart <= cursor).length])
+    .filter(([, n]) => n > 0)
+    .map(([id, n]) => `${id}:${n}`)
+    .join('|')
+  const [visible, legsShown] = useMemo(() => {
+    const shown = Object.fromEntries(legKey.split('|').filter(Boolean).map((s) => s.split(':')).map(([id, n]) => [id, +n]))
+    return [inRange.filter((t) => shown[t.id]), shown]
+  }, [inRange, legKey])
 
   function openTrip(t) {
     setCity(null)
@@ -111,6 +119,7 @@ export default function App() {
       <GlobeView
         ref={globe}
         trips={visible}
+        legsShown={legsShown}
         home={home}
         follow={playing}
         picking={picking}

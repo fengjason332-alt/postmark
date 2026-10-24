@@ -33,7 +33,28 @@ export const tripColor = (trip) => PALETTE[trip.index % PALETTE.length]
 // Trip line timing, shared by the globe (drawing) and the timeline replay (pacing).
 export const DRAW_MS = 1700 // how long one leg of a trip takes to draw itself
 export const PAUSE_MS = 600 // rest at each city (the stamp lands) before the next leg starts
-export const tripDrawMs = (trip) => (trip.cities.length + 1) * (DRAW_MS + PAUSE_MS)
+
+// The timeline runs on one continuous clock in days (day 0 = 1970-01-01, fractions = time of day).
+const DAY = 86400000
+export const dayNumber = (iso) => Math.round(new Date(iso + 'T00:00:00Z').getTime() / DAY)
+export const isoDay = (n) => new Date(Math.floor(n) * DAY).toISOString().slice(0, 10)
+
+// When each leg (home -> first city -> ... -> home) leaves and lands on that clock.
+// Legs set off in the morning of the leaving day and land in the afternoon of the arriving day.
+export function legTimes(trip) {
+  const n = trip.cities.length
+  const legs = []
+  let ready = -Infinity
+  for (let i = 0; i <= n; i++) {
+    const leave = i === 0 ? trip.start_date : trip.cities[i - 1].leave ?? trip.cities[i - 1].arrive
+    const land = i === n ? trip.end_date : trip.cities[i].arrive ?? leave
+    const depart = Math.max(ready, dayNumber(leave) + 0.3)
+    const arrive = Math.max(depart + 0.2, dayNumber(land) + 0.6)
+    legs.push({ depart, arrive })
+    ready = arrive
+  }
+  return legs
+}
 
 const R = 6371
 const rad = (d) => (d * Math.PI) / 180
