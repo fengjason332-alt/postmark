@@ -8,8 +8,10 @@ import { homeSeal, postmark } from './stamps.js'
 import { BORDER_COLOR, citiesOf, tripColor } from './data.js'
 import { angularDistance, createBorderLayers, loadCities, visibleCities } from './geoLayers.js'
 
-const DRAW_MS = 1100 // how long one ink line takes to write itself
-const STAGGER_MS = 650 // gap between consecutive trips when several appear at once
+const DRAW_MS = 1700 // how long one leg of a trip takes to draw itself
+const PAUSE_MS = 600 // rest at each city (the stamp lands) before the next leg starts
+const TRAVEL_MS = 3200 // the travelling dot's time per leg, pause included
+const DOT = 0.07 // the travelling dot's length, as a share of the leg
 const isPhone = () => window.innerWidth < 720
 let texture = null // painted once, on first use
 
@@ -32,7 +34,7 @@ const GlobeView = forwardRef(function GlobeView(
   const overlay = useRef()
   const borders = useRef(null)
   const [size, setSize] = useState({ width: window.innerWidth, height: window.innerHeight })
-  const [tick, setTick] = useState(0) // bumps every frame while lines are being drawn
+  const [tick, setTick] = useState(0) // bumps each animation frame (lines drawing, travelling dots)
   const [labels, setLabels] = useState([])
   const cities = useRef(null)
   const lastLabelPov = useRef(null)
@@ -109,25 +111,27 @@ const GlobeView = forwardRef(function GlobeView(
   }
 
   // Arcs per trip, in visit order: home -> first city -> ... -> last city -> home.
-  // Each leg has a solid line that writes itself once, plus a "flow" twin whose short
-  // dashes keep travelling along it, so the direction of the journey stays readable.
+  // Legs draw one after another (pausing at each city), and new trips queue behind each
+  // other. Once a trip is drawn, a small dot keeps travelling it leg by leg, in order.
   const arcs = useMemo(() => {
     const now = performance.now()
     const next = new Map()
     const homeKey = `${home.lat},${home.lng}`
-    let newTrips = 0
+    let queue = 0 // when the next newly shown trip may start drawing
     for (const trip of trips) {
       const stops = [home, ...trip.cities, home]
       const fresh = !arcCache.current.has(`${homeKey}:${trip.id}:0`)
-      const delay = fresh ? newTrips++ * STAGGER_MS : 0
+      const delay = fresh ? queue : 0
+      if (fresh) queue += (stops.length - 1) * (DRAW_MS + PAUSE_MS)
       for (let i = 0; i < stops.length - 1; i++) {
         const key = `${homeKey}:${trip.id}:${i}`
         next.set(key, arcCache.current.get(key) ?? {
           key, trip, leg: i, homeward: i === stops.length - 2,
           // Dashes grow from the arc's end, so start/end are swapped to write outward from home.
           from: stops[i + 1], to: stops[i],
-          born: now + delay + i * DRAW_MS * 0.8, gap: 1,
-          flow: { key: `${key}:flow`, trip, flow: true, from: stops[i], to: stops[i + 1] },
+          born: now + delay + i * (DRAW_MS + PAUSE_MS), gap: 1,
+          legs: stops.length - 1,
+          dot: { key: `${key}:dot`, trip, isDot: true, from: stops[i], to: stops[i + 1], offset: 1 },
         })
       }
     }
@@ -165,7 +169,7 @@ const GlobeView = forwardRef(function GlobeView(
         })
         el.appendChild(button)
         const arc = arcs.find((a) => a.trip.id === first.id && a.from.id === city.id)
-        button.style.animationDelay = `${arc ? Math.max(0, arc.born - now + DRAW_MS * 0.85) : 0}ms`
+        button.style.animationDelay = `${arc ? Math.max(0, arc.born - now + DRAW_MS * 0.9) : 0}ms`
         d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7 }
       }
       d.el._city = city
@@ -256,31 +260,48 @@ const GlobeView = forwardRef(function GlobeView(
     }
   }
 
-  // Ease each arc's dash offset from 1 (hidden) to 0 (fully drawn), then stop ticking.
+  // One animation loop: ease each leg's dash offset from 1 (hidden) to 0 (drawn), and move
+  // each fully drawn trip's travelling dot. Runs at full rate while lines are drawing and
+  // at ~30 fps afterwards, which is plenty for one small dot.
   useEffect(() => {
     let raf = 0
-    const step = () => {
-      const now = performance.now()
-      let busy = false
+    let last = 0
+    const step = (now) => {
+      raf = requestAnimationFrame(step)
+      let drawing = false
+      const done = new Map() // trip id -> time its last leg finished
       for (const a of arcs) {
         const t = Math.min(1, Math.max(0, (now - a.born) / DRAW_MS))
         a.gap = Math.pow(1 - t, 3)
-        if (t < 1) busy = true
+        if (t < 1) drawing = true
+        if (a.leg === a.legs - 1) done.set(a.trip.id, t < 1 ? null : a.born + DRAW_MS)
       }
+      for (const a of arcs) {
+        const end = done.get(a.trip.id)
+        a.dot.on = false
+        if (end == null) continue
+        const time = (now - end) % (a.legs * TRAVEL_MS)
+        const leg = Math.floor(time / TRAVEL_MS)
+        if (leg !== a.leg) continue
+        const p = Math.min(1, (time - leg * TRAVEL_MS) / (TRAVEL_MS - PAUSE_MS))
+        a.dot.on = p < 1
+        a.dot.offset = 1 - p * (1 + DOT)
+      }
+      if (!drawing && now - last < 33) return
+      last = now
       setTick((n) => n + 1)
-      if (busy) raf = requestAnimationFrame(step)
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
   }, [arcs])
 
-  // Flow dashes join each leg once its line has been written.
+  // Lines, plus the travelling dot on the leg each trip is currently on.
   const arcData = useMemo(
-    () => [...arcs, ...arcs.filter((a) => a.gap === 0).map((a) => a.flow)],
+    () => [...arcs, ...arcs.filter((a) => a.dot.on).map((a) => a.dot)],
     [arcs, tick], // eslint-disable-line react-hooks/exhaustive-deps
   )
-  // A new accessor identity each tick tells react-globe.gl to re-read the gaps.
-  const dashGap = useMemo(() => (d) => (d.flow ? 0 : d.gap), [tick]) // eslint-disable-line react-hooks/exhaustive-deps
+  // A new accessor identity each tick tells react-globe.gl to re-read the offsets.
+  const dashGap = useMemo(() => (d) => (d.isDot ? d.offset : d.gap), [tick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={`globe ${picking ? 'picking' : ''}`} ref={wrap}>
@@ -303,13 +324,12 @@ const GlobeView = forwardRef(function GlobeView(
         arcStartLng={(d) => d.from.lng}
         arcEndLat={(d) => d.to.lat}
         arcEndLng={(d) => d.to.lng}
-        arcColor={(d) => (d.flow ? ['#f6f0e4ee', '#f6f0e4ee'] : d.homeward ? [tripColor(d.trip) + '99', tripColor(d.trip) + '99'] : [tripColor(d.trip) + 'f4', tripColor(d.trip) + 'dd'])}
-        arcStroke={(d) => (d.flow ? 0.3 : 0.55)}
+        arcColor={(d) => (d.isDot ? ['#fbf7ee', '#fbf7ee'] : d.homeward ? [tripColor(d.trip) + '99', tripColor(d.trip) + '99'] : [tripColor(d.trip) + 'f4', tripColor(d.trip) + 'dd'])}
+        arcStroke={(d) => (d.isDot ? 0.9 : 0.55)}
         arcAltitudeAutoScale={0.32}
-        arcDashLength={(d) => (d.flow ? 0.04 : 1)}
-        arcDashGap={(d) => (d.flow ? 0.3 : 2)}
+        arcDashLength={(d) => (d.isDot ? DOT : 1)}
+        arcDashGap={2}
         arcDashInitialGap={dashGap}
-        arcDashAnimateTime={(d) => (d.flow ? 2600 : 0)}
         arcsTransitionDuration={0}
         arcLabel={(d) => `${d.trip.title} · ${d.trip.start_date}`}
         onArcClick={(d) => onTripClick(d.trip)}
