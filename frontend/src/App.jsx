@@ -124,7 +124,7 @@ export default function App() {
 
       <header className="masthead">
         <div className="brand">
-          <h1>Postmark</h1>
+          <h1><img src="/postmark-logo.png" alt="Postmark" /></h1>
           <span className="tagline">your camera roll, unfolded into a travel journal</span>
         </div>
         <div className="controls">

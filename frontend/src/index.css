@@ -63,6 +63,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .brand h1 {
   margin: 0; font-family: var(--serif); font-weight: 600; font-size: 40px; letter-spacing: -0.5px; line-height: 1;
 }
+.brand h1 img { display: block; height: 64px; width: auto; }
 .tagline { display: block; margin-top: 4px; font-family: var(--hand); font-size: 20px; color: var(--ink-soft); }
 
 .range {
@@ -74,7 +75,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .range button[aria-selected='true'] { background: var(--ink); color: var(--page); }
 
 .summary {
-  position: absolute; top: 104px; left: 28px; max-width: 360px; pointer-events: none;
+  position: absolute; top: 128px; left: 28px; max-width: 360px; pointer-events: none;
 }
 /* A soft halo of paper behind the text, so it stays readable over a zoomed-in map. */
 .brand, .summary { text-shadow: 0 0 6px var(--paper), 0 0 12px var(--paper), 0 0 2px var(--paper); }
@@ -271,6 +272,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @media (max-width: 720px) {
   .masthead { padding: 16px 16px 0; }
   .brand h1 { font-size: 30px; }
+  .brand h1 img { height: 44px; }
   .tagline { font-size: 17px; display: block; max-width: 190px; line-height: 1.1; }
   .range button { padding: 6px 12px; font-size: 14px; }
   .summary { top: 132px; left: 16px; right: 16px; }
