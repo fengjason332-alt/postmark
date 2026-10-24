@@ -469,12 +469,40 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .book.single .spread { grid-template-columns: 1fr; }
 .leaf { min-height: 0; overflow-y: auto; }
 :root .day-page { padding: 34px 44px 28px; }
-.spread.turn-next .leaf { animation: turn-next 0.5s cubic-bezier(0.3, 0.7, 0.3, 1) both; transform-origin: left center; }
-.spread.turn-prev .leaf { animation: turn-prev 0.5s cubic-bezier(0.3, 0.7, 0.3, 1) both; transform-origin: right center; }
-.spread.turn-next .leaf:nth-child(2) { animation-delay: 0.06s; }
-.spread.turn-prev .leaf:nth-child(1) { animation-delay: 0.06s; }
-@keyframes turn-next { from { opacity: 0; transform: rotateY(-22deg) translateX(18px); } }
-@keyframes turn-prev { from { opacity: 0; transform: rotateY(22deg) translateX(-18px); } }
+/* A page turn: one sheet swings around the spine. Its front is the old page, its back is the page
+   that lands on the other side; both darken a little as they tilt away from the light. */
+.spread { position: relative; }
+.spread.turning .leaf { pointer-events: none; }
+.sheet {
+  position: absolute; top: 0; bottom: 0; width: 50%; z-index: 3;
+  transform-style: preserve-3d; pointer-events: none; will-change: transform;
+}
+.sheet.one { width: 100%; }
+/* --p (0 to 1) is how far the sheet has turned, --bend (0 to 1 to 0) how much it bows on the way. */
+.sheet-next { left: 50%; transform-origin: left center; transform: rotateY(calc(var(--p, 0) * -180deg)) scaleY(calc(1 - var(--bend, 0) * 0.025)); }
+.sheet-next.one { left: 0; }
+.sheet-prev { left: 0; transform-origin: right center; transform: rotateY(calc(var(--p, 0) * 180deg)) scaleY(calc(1 - var(--bend, 0) * 0.025)); }
+.sheet-face {
+  position: absolute; inset: 0; display: flex; overflow: hidden;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  box-shadow: 0 0 34px rgba(40, 28, 12, 0.28);
+}
+.sheet-face > .leaf { flex: 1; min-width: 0; overflow: hidden; }
+.sheet-face.back { transform: rotateY(180deg); }
+.sheet-face::after { /* the page darkens as it tilts away from the light */
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, rgba(40, 28, 12, 0.5), rgba(40, 28, 12, 0.05) 60%, rgba(40, 28, 12, 0.35));
+}
+.sheet-face.front::after { opacity: calc(var(--p, 0) * 0.55); }
+.sheet-face.back::after { opacity: calc((1 - var(--p, 0)) * 0.55); }
+.sheet-face::before { /* a soft highlight across the bowed page, strongest halfway */
+  content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  opacity: calc(var(--bend, 0) * 0.5);
+  background: linear-gradient(90deg, transparent 25%, rgba(255, 255, 255, 0.6) 50%, transparent 75%);
+}
+.book.paged .spread { cursor: grab; touch-action: pan-y; }
+.spread.turning { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+@media (prefers-reduced-motion: reduce) { .sheet { display: none; } }
 
 .day-head {
   position: relative; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px;
