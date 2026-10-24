@@ -3,15 +3,14 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import Globe from 'react-globe.gl'
 import { MeshPhongMaterial } from 'three'
-import { makeGlobeTexture } from './globeTexture.js'
+import globeTexture from './assets/globe-gouache.webp' // painted by globeTexture.js, baked so it loads instantly
 import { homeSeal, postmark } from './stamps.js'
-import { BORDER_COLOR, citiesOf, DRAW_MS, distanceKm, PAUSE_MS, tripColor } from './data.js'
+import { BORDER_COLOR, citiesOf, DRAW_MS, distanceKm, PAUSE_MS, STAY, tripColor } from './data.js'
 import { angularDistance, createBorderLayers, loadCities, visibleCities } from './geoLayers.js'
 
 const FADED = 0.16 // how bright a leg stays once the route has moved on
 const REST = 0.55 // brightness of every route once all legs have flown
 const isPhone = () => window.innerWidth < 720
-let texture = null // painted once, on first use
 const hexAlpha = (hex, a) => hex + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, '0')
 
 // Fog and blur only appear when the camera is pulled far back: clear at the default view
@@ -25,7 +24,7 @@ function applyFog(el, altitude) {
 }
 
 const GlobeView = forwardRef(function GlobeView(
-  { trips, legsShown, home, follow, picking, onPick, onTripClick, onCityClick },
+  { trips, story, cursor, home, follow, picking, onPick, onTripClick, onCityClick },
   ref,
 ) {
   const globe = useRef()
@@ -37,14 +36,11 @@ const GlobeView = forwardRef(function GlobeView(
   const [labels, setLabels] = useState([])
   const cities = useRef(null)
   const lastLabelPov = useRef(null)
-  const globeImage = useMemo(() => (texture ??= makeGlobeTexture()), [])
   const material = useMemo(() => new MeshPhongMaterial({ shininess: 0 }), []) // matte paper, no glare
   const arcCache = useRef(new Map()) // key -> arc datum, kept so existing lines don't redraw
   const stampCache = useRef(new Map()) // city id -> html datum
   const labelCache = useRef(new Map())
   const handlers = useRef({})
-  const followRef = useRef(follow)
-  followRef.current = follow
   handlers.current = { onCityClick }
 
   useImperativeHandle(ref, () => ({
@@ -63,14 +59,14 @@ const GlobeView = forwardRef(function GlobeView(
   }))
 
   // Turn the camera toward a leg: centred between its two ends, pulled back for long hops.
-  function followLeg(a) {
+  function followLeg(a, ms = DRAW_MS) {
     const g = globe.current
     if (!g) return
     setRotating(false)
     const km = distanceKm(a.from, a.to)
     const altitude = Math.min(2.2, Math.max(0.55, 0.45 + km / 2500))
     const lng = a.from.lng + (((a.to.lng - a.from.lng + 540) % 360) - 180) * 0.6
-    g.pointOfView({ lat: a.from.lat + (a.to.lat - a.from.lat) * 0.6, lng, altitude }, DRAW_MS)
+    g.pointOfView({ lat: a.from.lat + (a.to.lat - a.from.lat) * 0.6, lng, altitude }, ms)
   }
 
   function setRotating(on) {
@@ -123,47 +119,74 @@ const GlobeView = forwardRef(function GlobeView(
   }
 
   // Arcs per trip, in visit order: home -> first city -> ... -> last city -> home.
-  // Only legs that have set off on the timeline are shown. A leg appearing for the first
-  // time draws now; several appearing at once (dragging the bar) queue one after another.
+  // Outside a replay, legs draw one after another (pausing at each city) and new trips
+  // queue behind each other. During a replay the timeline's position drives them instead.
   const arcs = useMemo(() => {
     const now = performance.now()
     const next = new Map()
     const homeKey = `${home.lat},${home.lng}`
-    let queue = 0 // when the next new leg may start drawing
+    let queue = 0 // when the next newly shown trip may start drawing
     for (const trip of trips) {
       const stops = [home, ...trip.cities, home]
-      const count = Math.min(stops.length - 1, legsShown?.[trip.id] ?? stops.length - 1)
-      for (let i = 0; i < count; i++) {
+      const fresh = !arcCache.current.has(`${homeKey}:${trip.id}:0`)
+      const delay = fresh ? queue : 0
+      if (fresh) queue += (stops.length - 1) * (DRAW_MS + PAUSE_MS)
+      for (let i = 0; i < stops.length - 1; i++) {
         const key = `${homeKey}:${trip.id}:${i}`
-        let a = arcCache.current.get(key)
-        if (!a) {
-          a = {
-            key, trip, leg: i, homeward: i === stops.length - 2,
-            // three-globe reveals a dash from the arc's start, so each leg grows from where it leaves.
-            from: stops[i], to: stops[i + 1],
-            born: now + queue, gap: 1,
-          }
-          queue += DRAW_MS + PAUSE_MS
+        const a = arcCache.current.get(key) ?? {
+          key, trip, leg: i, homeward: i === stops.length - 2,
+          // three-globe reveals a dash from the arc's start, so each leg grows from where it leaves.
+          from: stops[i], to: stops[i + 1],
+          born: now + delay + i * (DRAW_MS + PAUSE_MS), gap: 1,
         }
+        a.span = story.legs[trip.id]?.[i] ?? { start: 0, end: 0 } // this leg's stretch of the timeline
         next.set(key, a)
       }
     }
     arcCache.current = next
     return [...next.values()]
-  }, [trips, legsShown, home])
+  }, [trips, story, home])
+
+  // During a replay, every leg is drawn exactly as far as the timeline knob is through its
+  // stretch, glows while its stamp lands, then fades as the route moves on.
+  const replay = cursor !== null
+  if (replay) {
+    for (const a of arcs) {
+      const p = Math.max(0, Math.min(1, cursor - a.span.start))
+      a.gap = 1 - p
+      const after = cursor - a.span.end - STAY
+      a.glow = after <= 0 ? 1 : Math.max(FADED, 1 - after * 1.6)
+    }
+  }
+  const landedKey = replay ? arcs.filter((a) => cursor >= a.span.end - 0.08).map((a) => a.key).join('|') : null
+
+  // The camera follows the leg the knob is in, arriving as the line does.
+  const followed = useRef(null)
+  useEffect(() => {
+    if (!replay) {
+      followed.current = null
+      return
+    }
+    const a = arcs.find((x) => cursor >= x.span.start && cursor < x.span.end)
+    if (follow && a && followed.current !== a.key) {
+      followed.current = a.key
+      followLeg(a, Math.max(300, (a.span.end - cursor) * DRAW_MS))
+    }
+  })
 
   // Stamps land when the first line reaching them is finished. Each sits just above a
   // small dot on the city's exact position, so the lines visibly meet the right spot.
   const markers = useMemo(() => {
     const now = performance.now()
+    const landed = landedKey === null ? null : new Set(landedKey.split('|'))
     const visited = citiesOf(trips)
     const maxCount = Math.max(1, ...visited.map((c) => c.photo_count))
     const next = new Map()
     for (const city of visited) {
       const first = city.visits[0].trip
-      // A stamp only appears once a line on the globe is heading for it.
       const arc = arcs.find((a) => a.trip.id === first.id && a.to.id === city.id)
-      if (!arc) continue
+      // During a replay a stamp only appears once the line reaching it has arrived.
+      if (landed && !landed.has(arc?.key)) continue
       const px = Math.round(34 + 30 * Math.sqrt(city.photo_count / maxCount))
       // Stop number within its first trip, shown when that trip visits several cities.
       const stop = first.cities.length > 1 ? first.cities.findIndex((c) => c.id === city.id) + 1 : 0
@@ -185,7 +208,7 @@ const GlobeView = forwardRef(function GlobeView(
         })
         el.appendChild(button)
         // The dot, stamp and stop number all land when the first line reaching the city arrives.
-        el.style.setProperty('--land', `${Math.max(0, arc.born - now + DRAW_MS * 0.9)}ms`)
+        el.style.setProperty('--land', `${landed || !arc ? 0 : Math.max(0, arc.born - now + DRAW_MS * 0.9)}ms`)
         d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7 }
       }
       d.el._city = city
@@ -193,7 +216,7 @@ const GlobeView = forwardRef(function GlobeView(
     }
     stampCache.current = next
     return [...next.values()]
-  }, [trips, arcs])
+  }, [trips, arcs, landedKey])
 
   const seal = useMemo(() => {
     const el = document.createElement('div')
@@ -281,6 +304,7 @@ const GlobeView = forwardRef(function GlobeView(
   // leg has flown, all routes settle at a soft, readable brightness.
   // Runs at full rate while anything is changing and stops when everything is still.
   useEffect(() => {
+    if (replay) return undefined // the timeline drives the lines during a replay
     let raf = 0
     const step = (now) => {
       let moving = false
@@ -290,10 +314,6 @@ const GlobeView = forwardRef(function GlobeView(
         const t = Math.min(1, Math.max(0, (now - a.born) / DRAW_MS))
         a.gap = Math.pow(1 - t, 3)
         // During a replay the camera follows each leg as it starts drawing.
-        if (!a.followed && now >= a.born) {
-          a.followed = true
-          if (followRef.current && t < 1) followLeg(a)
-        }
         const target = settled ? REST : now < a.born + DRAW_MS + PAUSE_MS ? 1 : FADED
         a.glow = a.glow === undefined ? target : a.glow + (target - a.glow) * 0.07
         if (t < 1 || Math.abs(a.glow - target) > 0.01) moving = true
@@ -303,16 +323,16 @@ const GlobeView = forwardRef(function GlobeView(
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [arcs])
+  }, [arcs, replay])
 
   // Each leg's colour carries its current brightness; a new identity each tick re-reads it.
   const arcColor = useMemo(() => (d) => {
     const c = tripColor(d.trip)
     const glow = d.glow ?? 1
     return [hexAlpha(c, glow * 0.96), hexAlpha(c, glow * (d.homeward ? 0.6 : 0.86))]
-  }, [tick]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tick, cursor]) // eslint-disable-line react-hooks/exhaustive-deps
   // A new accessor identity each tick tells react-globe.gl to re-read the offsets.
-  const dashGap = useMemo(() => (d) => d.gap, [tick]) // eslint-disable-line react-hooks/exhaustive-deps
+  const dashGap = useMemo(() => (d) => d.gap, [tick, cursor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={`globe ${picking ? 'picking' : ''}`} ref={wrap}>
@@ -325,7 +345,7 @@ const GlobeView = forwardRef(function GlobeView(
         onZoom={onView}
         onGlobeClick={(pt) => picking && onPick(pt)}
         backgroundColor="rgba(0,0,0,0)"
-        globeImageUrl={globeImage}
+        globeImageUrl={globeTexture}
         globeMaterial={material}
         showAtmosphere
         atmosphereColor="#c9cdd0"

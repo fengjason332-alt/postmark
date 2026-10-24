@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import GlobeView from './GlobeView.jsx'
-import { filterTrips, legTimes, loadData, sentence, summarize, thisYear, withHome } from './data.js'
+import { filterTrips, loadData, sentence, storyline, summarize, thisYear, withHome } from './data.js'
 import { loadCities, nearestCity } from './geoLayers.js'
 import { PAINT_FILTER } from './stamps.js'
 import Logbook from './Logbook.jsx'
@@ -37,7 +37,7 @@ export default function App() {
   const [customHome, setCustomHome] = useState(savedHome)
   const [homeOpen, setHomeOpen] = useState(false)
   const [picking, setPicking] = useState(false)
-  const [cursor, setCursor] = useState(null) // point on the day clock; legs leaving after it are hidden
+  const [cursor, setCursor] = useState(null) // replay position in story time (see storyline); null = everything shown
   const [playing, setPlaying] = useState(false) // timeline replay running: the globe follows the lines
   const [trip, setTrip] = useState(null)
   const [city, setCity] = useState(null)
@@ -55,17 +55,7 @@ export default function App() {
 
   const inRange = useMemo(() => filterTrips(allTrips, range === 'year' ? thisYear() : 'all'), [allTrips, range])
 
-  // How many legs of each trip have set off by the cursor. The globe only gets a new list
-  // when that changes (a leg departs), not on every timeline tick.
-  const legKey = inRange
-    .map((t) => [t.id, cursor === null ? t.cities.length + 1 : legTimes(t).filter((l) => l.depart <= cursor).length])
-    .filter(([, n]) => n > 0)
-    .map(([id, n]) => `${id}:${n}`)
-    .join('|')
-  const [visible, legsShown] = useMemo(() => {
-    const shown = Object.fromEntries(legKey.split('|').filter(Boolean).map((s) => s.split(':')).map(([id, n]) => [id, +n]))
-    return [inRange.filter((t) => shown[t.id]), shown]
-  }, [inRange, legKey])
+  const story = useMemo(() => storyline(inRange), [inRange])
 
   function openTrip(t) {
     setCity(null)
@@ -118,8 +108,9 @@ export default function App() {
       <div dangerouslySetInnerHTML={{ __html: PAINT_FILTER }} />
       <GlobeView
         ref={globe}
-        trips={visible}
-        legsShown={legsShown}
+        trips={inRange}
+        story={story}
+        cursor={cursor}
         home={home}
         follow={playing}
         picking={picking}
@@ -161,7 +152,7 @@ export default function App() {
         )}
       </section>
 
-      <Timeline trips={inRange} cursor={cursor} onCursor={setCursor} onOpen={openTrip} onPlaying={setPlaying} />
+      <Timeline trips={inRange} story={story} cursor={cursor} onCursor={setCursor} onOpen={openTrip} onPlaying={setPlaying} />
 
       <footer className="privacy">
         Photos are processed only on your own computer · Home is shown at city level only · Map data: GeoNames (CC BY 4.0), Natural Earth

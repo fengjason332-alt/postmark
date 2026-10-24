@@ -2,7 +2,6 @@
 // that appear in order of size. Data is loaded lazily so the first paint stays fast.
 import { BufferGeometry, Float32BufferAttribute, LineBasicMaterial, LineSegments } from 'three'
 import { mesh } from 'topojson-client'
-import world from 'world-atlas/countries-50m.json'
 
 const toXYZ = (lat, lng, r) => {
   // Same convention as three-globe's polar2Cartesian.
@@ -33,14 +32,20 @@ function lineLayer(lines, radius, color) {
   return obj
 }
 
-// Builds country borders right away and state/province borders once their data arrives.
+// Builds country borders and then state/province borders as their data arrives, so
+// neither file holds up the first view of the globe.
 export function createBorderLayers(scene, radius, color) {
-  const countryLines = mesh(world, world.objects.countries).coordinates
-  const countries = lineLayer(countryLines, radius * 1.0006, color)
-  scene.add(countries)
-  const layers = { countries, states: null }
+  const layers = { countries: null, states: null, altitude: 3 }
+
+  import('world-atlas/countries-50m.json').then(({ default: world }) => {
+    if (layers.disposed) return
+    layers.countries = lineLayer(mesh(world, world.objects.countries).coordinates, radius * 1.0006, color)
+    scene.add(layers.countries)
+    api.setAltitude(layers.altitude)
+  })
 
   import('./geo/admin1-lines.json').then(({ default: data }) => {
+    if (layers.disposed) return
     const s = data.scale
     const lines = data.lines.map((flat) => {
       const pts = []
@@ -49,28 +54,19 @@ export function createBorderLayers(scene, radius, color) {
     })
     layers.states = lineLayer(lines, radius * 1.0005, color)
     scene.add(layers.states)
-    layers.onReady?.()
+    api.setAltitude(layers.altitude)
   })
 
-  return {
+  const api = {
     // Fade borders in as the camera comes closer (altitude is in globe radii).
     setAltitude(alt) {
-      countries.material.opacity = clamp01((2.4 - alt) / 1.4) * 0.75
+      layers.altitude = alt
+      if (layers.countries) layers.countries.material.opacity = clamp01((2.4 - alt) / 1.4) * 0.75
       if (layers.states) layers.states.material.opacity = clamp01((1.3 - alt) / 0.7) * 0.55
     },
-    setColor(c) {
-      countries.material.color.set(c)
-      layers.states?.material.color.set(c)
-      layers.pendingColor = c
-    },
-    onReady(fn) {
-      layers.onReady = () => {
-        if (layers.pendingColor) layers.states.material.color.set(layers.pendingColor)
-        fn()
-      }
-    },
     dispose() {
-      for (const l of [countries, layers.states]) {
+      layers.disposed = true
+      for (const l of [layers.countries, layers.states]) {
         if (!l) continue
         scene.remove(l)
         l.geometry.dispose()
@@ -78,6 +74,7 @@ export function createBorderLayers(scene, radius, color) {
       }
     },
   }
+  return api
 }
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v))

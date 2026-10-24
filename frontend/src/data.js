@@ -56,6 +56,38 @@ export function legTimes(trip) {
   return legs
 }
 
+// The replay clock ("story time"), measured in leg-drawing times. Every leg gets the same
+// stretch of the bar, so the bar moves at an even pace and a line is always exactly as far
+// along as the bar is through its stretch. Dates on the bar are read off at each leg's ends.
+export const STAY = PAUSE_MS / DRAW_MS // the stamp landing between two legs
+export const GAP = 0.7 // the calendar running on between two trips
+export function storyline(trips) {
+  const legs = {} // trip id -> [{ start, end }] in story time
+  const keys = [] // [story time, day number] points the bar's date is read from
+  if (!trips.length) return { legs, total: 0, dayAt: () => 0 }
+  keys.push([0, dayNumber(trips[0].start_date) - 3])
+  let pos = GAP
+  for (const trip of trips) {
+    legs[trip.id] = legTimes(trip).map((leg) => {
+      keys.push([pos, leg.depart])
+      const span = { start: pos, end: pos + 1 }
+      keys.push([span.end, leg.arrive])
+      pos = span.end + STAY
+      return span
+    })
+    pos += GAP
+  }
+  keys.push([pos, dayNumber(trips[trips.length - 1].end_date) + 3])
+  const dayAt = (t) => {
+    let i = 1
+    while (i < keys.length - 1 && keys[i][0] < t) i++
+    const [t0, d0] = keys[i - 1]
+    const [t1, d1] = keys[i]
+    return d0 + (d1 - d0) * Math.max(0, Math.min(1, (t - t0) / (t1 - t0 || 1)))
+  }
+  return { legs, total: pos, dayAt }
+}
+
 const R = 6371
 const rad = (d) => (d * Math.PI) / 180
 export function distanceKm(a, b) {

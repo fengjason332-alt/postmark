@@ -1,4 +1,7 @@
 // Paints the gouache globe onto an equirectangular canvas.
+// Not run when the app loads (painting took several seconds): its output is baked into
+// assets/globe-gouache.webp. After changing this file, run makeGlobeTexture() in the dev
+// console, save the result as WebP (quality ~0.86) and replace that file.
 import { feature } from 'topojson-client'
 import world from 'world-atlas/countries-50m.json'
 import landTopo from 'world-atlas/land-50m.json'
