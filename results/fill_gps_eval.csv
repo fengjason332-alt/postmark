@@ -1,0 +1,4 @@
+person,max_gap_hours,max_km,holdout_n,filled_n,fill_rate,median_err_km,p90_err_km
+kunal,1.0,1.0,45,41,0.911,0.002,0.04
+kunal,3.0,2.0,45,42,0.933,0.002,0.049
+kunal,0.25,0.5,45,38,0.844,0.002,0.035
