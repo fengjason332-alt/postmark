@@ -5,11 +5,12 @@ import Globe from 'react-globe.gl'
 import { MeshPhongMaterial } from 'three'
 import globeTexture from './assets/globe-gouache.webp' // painted by globeTexture.js, baked so it loads instantly
 import { homeSeal, postmark } from './stamps.js'
-import { BORDER_COLOR, citiesOf, DRAW_MS, distanceKm, PAUSE_MS, STAY, tripColor } from './data.js'
+import { BORDER_COLOR, citiesOf, DRAW_MS, distanceKm, STAY, tripColor } from './data.js'
 import { angularDistance, createBorderLayers, loadCities, visibleCities } from './geoLayers.js'
 
 const FADED = 0.16 // how bright a leg stays once the route has moved on
 const REST = 0.55 // brightness of every route once all legs have flown
+const IDLE_MS = 6000 // untouched this long (and zoomed out), the globe starts its slow spin
 const isPhone = () => window.innerWidth < 720
 const hexAlpha = (hex, a) => hex + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, '0')
 
@@ -48,11 +49,11 @@ const GlobeView = forwardRef(function GlobeView(
       const pts = trip.cities
       const lat = pts.reduce((s, c) => s + c.lat, 0) / pts.length
       const lng = pts.reduce((s, c) => s + c.lng, 0) / pts.length
-      setRotating(false)
+      touch()
       globe.current.pointOfView({ lat, lng, altitude: 1.5 }, 1400)
     },
     lookAt({ lat, lng }, altitude = 1.2) {
-      setRotating(false)
+      touch()
       globe.current.pointOfView({ lat, lng, altitude }, 1200)
     },
     setRotating,
@@ -62,17 +63,38 @@ const GlobeView = forwardRef(function GlobeView(
   function followLeg(a, ms = DRAW_MS) {
     const g = globe.current
     if (!g) return
-    setRotating(false)
+    touch()
     const km = distanceKm(a.from, a.to)
     const altitude = Math.min(2.2, Math.max(0.55, 0.45 + km / 2500))
     const lng = a.from.lng + (((a.to.lng - a.from.lng + 540) % 360) - 180) * 0.6
     g.pointOfView({ lat: a.from.lat + (a.to.lat - a.from.lat) * 0.6, lng, altitude }, ms)
   }
 
-  function setRotating(on) {
+  // Idle spin: the globe turns slowly only while it is zoomed out and nobody has touched it
+  // for a few seconds. Any press, drag, zoom or hovering a pin stops it at once, so pins hold
+  // still when you go to click them. App can switch it off entirely (e.g. while a page is open).
+  const spin = useRef({ allowed: true, hover: false, last: 0, replay: false })
+  spin.current.replay = cursor !== null
+  function touch() {
+    spin.current.last = performance.now()
     const controls = globe.current?.controls()
-    if (controls) controls.autoRotate = on
+    if (controls) controls.autoRotate = false
   }
+  function setRotating(on) {
+    spin.current.allowed = on
+    touch()
+  }
+  useEffect(() => {
+    const id = setInterval(() => {
+      const g = globe.current
+      if (!g) return
+      const s = spin.current
+      if (s.hover && !overlay.current?.querySelector('.pin:hover')) s.hover = false // pin went away under the pointer
+      const idle = performance.now() - s.last > IDLE_MS
+      g.controls().autoRotate = s.allowed && !s.hover && !s.replay && idle && g.pointOfView().altitude > 1.7
+    }, 300)
+    return () => clearInterval(id)
+  }, [])
 
   // Keep the canvas filling the window.
   useEffect(() => {
@@ -88,7 +110,9 @@ const GlobeView = forwardRef(function GlobeView(
     const g = globe.current
     if (!g || borders.current) return // globe.gl can report ready more than once; set up only once
     const controls = g.controls()
-    controls.autoRotate = true
+    controls.addEventListener('start', touch) // user starts dragging or zooming
+    wrap.current.addEventListener('pointerdown', touch)
+    wrap.current.addEventListener('wheel', touch, { passive: true })
     controls.autoRotateSpeed = 0.35
     controls.minDistance = 112 // close enough to read town names
     controls.maxDistance = 600
@@ -119,25 +143,19 @@ const GlobeView = forwardRef(function GlobeView(
   }
 
   // Arcs per trip, in visit order: home -> first city -> ... -> last city -> home.
-  // Outside a replay, legs draw one after another (pausing at each city) and new trips
-  // queue behind each other. During a replay the timeline's position drives them instead.
+  // While exploring, every route is simply there, drawn softly. During a replay (the play
+  // button) the timeline's position draws them leg by leg instead.
   const arcs = useMemo(() => {
-    const now = performance.now()
     const next = new Map()
     const homeKey = `${home.lat},${home.lng}`
-    let queue = 0 // when the next newly shown trip may start drawing
     for (const trip of trips) {
       const stops = [home, ...trip.cities, home]
-      const fresh = !arcCache.current.has(`${homeKey}:${trip.id}:0`)
-      const delay = fresh ? queue : 0
-      if (fresh) queue += (stops.length - 1) * (DRAW_MS + PAUSE_MS)
       for (let i = 0; i < stops.length - 1; i++) {
         const key = `${homeKey}:${trip.id}:${i}`
         const a = arcCache.current.get(key) ?? {
           key, trip, leg: i, homeward: i === stops.length - 2,
           // three-globe reveals a dash from the arc's start, so each leg grows from where it leaves.
-          from: stops[i], to: stops[i + 1],
-          born: now + delay + i * (DRAW_MS + PAUSE_MS), gap: 1,
+          from: stops[i], to: stops[i + 1], gap: 0,
         }
         a.span = story.legs[trip.id]?.[i] ?? { start: 0, end: 0 } // this leg's stretch of the timeline
         next.set(key, a)
@@ -174,10 +192,20 @@ const GlobeView = forwardRef(function GlobeView(
     }
   })
 
+  // A stamp with others folded under it zooms in until they separate; otherwise it opens the city.
+  function openStamp(el) {
+    const members = el._members ?? []
+    if (!members.length) return handlers.current.onCityClick(el._city)
+    const all = [el._city, ...members]
+    const lat = all.reduce((s, c) => s + c.lat, 0) / all.length
+    const lng = all.reduce((s, c) => s + c.lng, 0) / all.length
+    touch()
+    globe.current.pointOfView({ lat, lng, altitude: Math.max(0.35, globe.current.pointOfView().altitude * 0.45) }, 900)
+  }
+
   // Stamps land when the first line reaching them is finished. Each sits just above a
   // small dot on the city's exact position, so the lines visibly meet the right spot.
   const markers = useMemo(() => {
-    const now = performance.now()
     const landed = landedKey === null ? null : new Set(landedKey.split('|'))
     const visited = citiesOf(trips)
     const maxCount = Math.max(1, ...visited.map((c) => c.photo_count))
@@ -201,15 +229,19 @@ const GlobeView = forwardRef(function GlobeView(
         const button = document.createElement('button')
         button.className = 'postmark'
         button.innerHTML = postmark(city, tripColor(first)) + (stop ? `<b class="stop-no">${stop}</b>` : '')
-        // Listen on the whole pin so a folded stamp's dot is clickable too.
+        // Listen on the whole pin so the dot, the stamp and a folded stamp are all clickable.
         el.addEventListener('click', (e) => {
           e.stopPropagation()
-          handlers.current.onCityClick(el._city)
+          openStamp(el)
         })
+        // Hovering a pin holds the globe still so it can be clicked.
+        el.addEventListener('pointerenter', () => { spin.current.hover = true; touch() })
+        el.addEventListener('pointerleave', () => { spin.current.hover = false; touch() })
         el.appendChild(button)
-        // The dot, stamp and stop number all land when the first line reaching the city arrives.
-        el.style.setProperty('--land', `${landed || !arc ? 0 : Math.max(0, arc.born - now + DRAW_MS * 0.9)}ms`)
-        d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7 }
+        el._more = document.createElement('b')
+        el._more.className = 'more'
+        el.appendChild(el._more)
+                d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7 }
       }
       d.el._city = city
       next.set(city.id, d)
@@ -223,7 +255,7 @@ const GlobeView = forwardRef(function GlobeView(
     el.className = 'pin seal'
     el.title = `Home · ${home.city}`
     el.innerHTML = `<i class="pin-dot"></i><div class="seal-art">${homeSeal(home.city)}</div>`
-    return { key: 'home', lat: home.lat, lng: home.lng, el, kind: 'seal', rank: 2e9, w: 46, h: 30 }
+    return { key: 'home', lat: home.lat, lng: home.lng, el, kind: 'seal', rank: 5e8, w: 46, h: 30 }
   }, [home])
 
   // Small map labels for nearby cities; visited cities already have a stamp, so skip them.
@@ -265,8 +297,9 @@ const GlobeView = forwardRef(function GlobeView(
   useEffect(() => layoutPins(), [size]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Position every pin, hide the ones on the far side, and declutter: higher-ranked pins
-  // (home, then stamps by photos, then labels by population) claim space first; a stamp
-  // that would overlap shrinks to its dot, and an overlapping label is hidden.
+  // (stamps by photos, then the home seal, then labels by population) claim space first;
+  // a stamp that would overlap folds to its dot under a "+N" stamp, and an overlapping
+  // label is hidden.
   function layoutPins() {
     const g = globe.current
     if (!g || !overlay.current) return
@@ -274,10 +307,14 @@ const GlobeView = forwardRef(function GlobeView(
     g.camera().updateMatrixWorld()
     const cam = g.camera().position
     const radius = g.getGlobeRadius()
-    const placed = []
-    const hits = (r) => placed.some((q) => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h)
+    // Stamps shrink as the camera pulls back, so far away they don't cover their neighbours.
+    const zs = Math.max(0.55, Math.min(1, 1.25 - g.pointOfView().altitude * 0.22))
+    overlay.current.style.setProperty('--zs', zs.toFixed(3))
+    const placed = [] // { x, y, w, h, host } boxes already claimed on screen
+    const hit = (r) => placed.find((q) => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h)
     const sorted = [...pinsRef.current].sort((a, b) => b.rank - a.rank)
     for (const p of sorted) {
+      if (p.kind === 'stamp') p.el._members = []
       const c = g.getCoords(p.lat, p.lng, 0)
       const facing = (c.x * cam.x + c.y * cam.y + c.z * cam.z) / radius
       const visible = facing > radius * 1.04 // a little margin so pins fade before the rim
@@ -285,41 +322,55 @@ const GlobeView = forwardRef(function GlobeView(
       if (!visible) continue
       const s = g.getScreenCoords(p.lat, p.lng, 0)
       p.el.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px)`
+      p.el._xy = s
       if (p.kind === 'label') {
         const r = { x: s.x - 3, y: s.y - p.h / 2, w: p.w, h: p.h }
-        const crowded = hits(r)
+        const crowded = !!hit(r)
         p.el.classList.toggle('crowded', crowded)
         if (!crowded) placed.push(r)
       } else {
-        const r = { x: s.x - p.w / 2, y: s.y - p.h - 8, w: p.w, h: p.h + 8 }
-        const crowded = p.kind === 'stamp' && hits(r)
-        p.el.classList.toggle('mini', crowded)
-        placed.push(crowded ? { x: s.x - 5, y: s.y - 5, w: 10, h: 10 } : r)
+        const w = p.kind === 'stamp' ? p.w * zs : p.w
+        const h = p.kind === 'stamp' ? p.h * zs : p.h
+        const r = { x: s.x - w / 2, y: s.y - h - 8, w, h: h + 8, host: p.kind === 'stamp' ? p : null }
+        const other = hit(r)
+        // A stamp that would cover a bigger one folds down to its dot (still clickable, still
+        // on the exact spot) and is counted on that stamp's "+N" badge instead. The home seal
+        // gives way to stamps the same way, leaving its red dot.
+        p.el.classList.toggle('mini', !!other)
+        if (p.kind === 'stamp') other?.host?.el._members.push(p.el._city)
+        placed.push(other ? { x: s.x - 6, y: s.y - 6, w: 12, h: 12, host: other.host } : r)
       }
+    }
+    // A crowd of stamps becomes one numbered bubble in the middle of its dots; every dot
+    // stays on its exact spot, and clicking the bubble zooms in until they separate.
+    for (const p of sorted) {
+      if (p.kind !== 'stamp') continue
+      const group = [p.el, ...p.el._members.map((c) => stampCache.current.get(c.id)?.el).filter(Boolean)]
+      const n = group.length
+      p.el.classList.toggle('has-more', n > 1)
+      if (n < 2) continue
+      const cx = group.reduce((t, el) => t + el._xy.x, 0) / n - p.el._xy.x
+      const cy = group.reduce((t, el) => t + el._xy.y, 0) / n - p.el._xy.y
+      p.el._more.textContent = n
+      p.el._more.title = group.map((el) => el._city.name).join(' · ')
+      p.el._more.style.transform = `translate(${cx.toFixed(1)}px, ${cy.toFixed(1)}px)`
     }
   }
 
-  // One animation loop. Each leg flies out like a shooting star: it draws, glows while
-  // the stamp lands, then fades to a faint trace as the next leg sets off. Once every
-  // leg has flown, all routes settle at a soft, readable brightness.
-  // Runs at full rate while anything is changing and stops when everything is still.
+  // Outside a replay every route rests fully drawn at a soft brightness. After a replay
+  // ends, the lines ease back to that rest state; the loop stops once they are still.
   useEffect(() => {
     if (replay) return undefined // the timeline drives the lines during a replay
     let raf = 0
-    const step = (now) => {
+    const step = () => {
       let moving = false
-      const lastLanded = arcs.reduce((m, a) => Math.max(m, a.born + DRAW_MS + PAUSE_MS), 0)
-      const settled = now > lastLanded + 600
       for (const a of arcs) {
-        const t = Math.min(1, Math.max(0, (now - a.born) / DRAW_MS))
-        a.gap = Math.pow(1 - t, 3)
-        // During a replay the camera follows each leg as it starts drawing.
-        const target = settled ? REST : now < a.born + DRAW_MS + PAUSE_MS ? 1 : FADED
-        a.glow = a.glow === undefined ? target : a.glow + (target - a.glow) * 0.07
-        if (t < 1 || Math.abs(a.glow - target) > 0.01) moving = true
+        a.gap = 0
+        a.glow = a.glow === undefined ? REST : a.glow + (REST - a.glow) * 0.07
+        if (Math.abs(a.glow - REST) > 0.01) moving = true
       }
       setTick((n) => n + 1)
-      if (moving || !settled) raf = requestAnimationFrame(step)
+      if (moving) raf = requestAnimationFrame(step)
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)

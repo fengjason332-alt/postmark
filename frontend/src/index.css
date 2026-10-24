@@ -92,9 +92,23 @@ button { font: inherit; color: inherit; cursor: pointer; }
   position: absolute; left: 0; bottom: 8px; transform: translateX(-50%); transform-origin: 50% 100%;
   pointer-events: auto; transition: transform 0.25s, opacity 0.25s;
 }
+.stamp .postmark { transform: translateX(-50%) scale(var(--zs, 1)); }
 .stamp.mini .postmark { transform: translateX(-50%) scale(0.2); opacity: 0; pointer-events: none; }
-.stamp.mini .pin-dot { pointer-events: auto; cursor: pointer; }
+/* The dot is the pin itself: always clickable, with a finger-sized hit area. */
+.stamp .pin-dot { pointer-events: auto; cursor: pointer; transition: transform 0.2s; }
+.stamp .pin-dot::after { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
+.stamp:hover .pin-dot { transform: scale(1.5); }
+/* A crowd of stamps (zoomed out) shows as one numbered bubble in the middle of its dots. */
+.stamp .more {
+  position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border-radius: 50%; display: none;
+  background: rgba(47, 58, 69, 0.88); color: #f6f2ea; font: 700 13px/30px var(--sans); text-align: center;
+  pointer-events: auto; cursor: zoom-in; box-shadow: 0 0 0 2px #f6f2ea, 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+.stamp.has-more:not(.mini) { z-index: 2; }
+.stamp.has-more:not(.mini) .more { display: block; }
+.stamp.has-more .postmark { transform: translateX(-50%) scale(0.2); opacity: 0; pointer-events: none; }
 .seal .seal-art { width: 46px; height: 46px; bottom: 2px; }
+.seal.mini .seal-art { opacity: 0; transform: translateX(-50%) scale(0.3); pointer-events: none; }
 .stop-no {
   position: absolute; top: 4px; left: -2px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
   background: #f6f2ea; color: var(--trip); box-shadow: 0 0 0 1.5px var(--trip);
