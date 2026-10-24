@@ -1,12 +1,12 @@
 :root {
-  --paper: #f4ecdc;
+  --paper: #f3efe7;
   --paper-deep: #eadfc8;
-  --ink: #2b2620;
-  --ink-soft: #6b6152;
-  --vermilion: #c23b22;
-  --page: #fbf6ec;
-  --serif: 'Fraunces', 'Noto Serif SC', Georgia, serif;
-  --hand: 'Caveat', 'Noto Serif SC', cursive;
+  --ink: #2f3a45;
+  --ink-soft: #6f7680;
+  --vermilion: #a8473a;
+  --page: #f6f2ea;
+  --serif: 'Cormorant Garamond', Georgia, serif;
+  --hand: 'Cormorant Garamond', Georgia, serif;
   --sans: 'Noto Sans SC', system-ui, -apple-system, sans-serif;
 }
 
@@ -33,8 +33,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .app { position: relative; height: 100%; }
-.globe { position: absolute; inset: 0; }
-.globe canvas { outline: none; }
+/* The globe screen behaves like an app: dragging it shouldn't highlight labels or drag images.
+   Text fields stay editable, and the logbook keeps its text selectable for copying. */
+.app { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.app img { -webkit-user-drag: none; }
+.app input, .app textarea, .overlay { -webkit-user-select: text; user-select: text; }
+.globe { position: absolute; inset: 0; isolation: isolate; z-index: 0; } /* keep map labels under overlays */
+.globe canvas {
+  outline: none;
+  /* Far away the globe sits in fog; it clears as you zoom in (vars set from GlobeView). */
+  filter: var(--fog-filter, none);
+  opacity: calc(1 - var(--fog-wash, 0) * 0.75);
+  transition: filter 0.25s linear, opacity 0.25s linear;
+}
+.globe.picking canvas { cursor: crosshair; }
 
 /* ---------- masthead ---------- */
 .masthead {
@@ -43,10 +55,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: 22px 28px 0; pointer-events: none;
 }
 .masthead > * { pointer-events: auto; }
+.controls { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .brand h1 {
   margin: 0; font-family: var(--serif); font-weight: 600; font-size: 40px; letter-spacing: -0.5px; line-height: 1;
 }
-.tagline { font-family: var(--hand); font-size: 22px; color: var(--ink-soft); }
+.tagline { display: block; margin-top: 4px; font-family: var(--hand); font-size: 20px; color: var(--ink-soft); }
 
 .range {
   display: flex; border: 1.5px solid var(--ink); border-radius: 999px; padding: 3px; background: rgba(251, 246, 236, 0.7);
@@ -57,24 +70,45 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .range button[aria-selected='true'] { background: var(--ink); color: var(--page); }
 
 .summary {
-  position: absolute; top: 92px; left: 28px; max-width: 360px; pointer-events: none;
+  position: absolute; top: 104px; left: 28px; max-width: 360px; pointer-events: none;
 }
+/* A soft halo of paper behind the text, so it stays readable over a zoomed-in map. */
+.brand, .summary { text-shadow: 0 0 6px var(--paper), 0 0 12px var(--paper), 0 0 2px var(--paper); }
 .sentence { margin: 0; font-family: var(--serif); font-size: 19px; line-height: 1.5; }
 .home-line { margin: 8px 0 0; font-size: 13px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .seal-dot { width: 10px; height: 10px; background: var(--vermilion); border-radius: 2px; display: inline-block; }
 .aside { font-size: 12px; opacity: 0.8; }
 
-/* ---------- markers on the globe ---------- */
-.marker { pointer-events: auto; transition: opacity 0.4s; }
-.marker.behind { opacity: 0; pointer-events: none; }
-.seal { width: 30px; height: 30px; z-index: 2; }
+/* ---------- pins on the globe (positioned by GlobeView) ---------- */
+.pins { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.pin { position: absolute; left: 0; top: 0; width: 0; height: 0; transition: opacity 0.3s; will-change: transform; }
+.pin.behind { opacity: 0; visibility: hidden; transition: opacity 0.3s, visibility 0s 0.3s; }
+.pin-dot {
+  position: absolute; left: -4px; top: -4px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--trip, var(--vermilion)); box-shadow: 0 0 0 2px rgba(246, 242, 234, 0.9);
+}
+/* The stamp sits just above its dot; when crowded it folds away and only the dot stays. */
+.stamp .postmark, .seal .seal-art {
+  position: absolute; left: 0; bottom: 8px; transform: translateX(-50%); transform-origin: 50% 100%;
+  pointer-events: auto; transition: transform 0.25s, opacity 0.25s;
+}
+.stamp.mini .postmark { transform: translateX(-50%) scale(0.2); opacity: 0; pointer-events: none; }
+.stamp.mini .pin-dot { pointer-events: auto; cursor: pointer; }
+.seal .seal-art { width: 46px; height: 46px; bottom: 2px; }
+.stop-no {
+  position: absolute; top: 4px; left: -2px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+  background: #f6f2ea; color: var(--trip); box-shadow: 0 0 0 1.5px var(--trip);
+  font: italic 700 11px/17px var(--serif); text-align: center;
+}
 .seal-svg { width: 100%; height: 100%; display: block; transform: rotate(-6deg); filter: drop-shadow(0 1px 1px rgba(80, 20, 10, 0.25)); }
 
 .postmark {
   width: var(--size); height: var(--size);
   display: block; border: 0; padding: 0; background: none;
-  animation: stamp 0.55s cubic-bezier(0.3, 1.6, 0.5, 1) both;
 }
+.postmark-svg { animation: stamp 0.55s cubic-bezier(0.3, 1.6, 0.5, 1) var(--land, 0ms) backwards; }
+.stamp .pin-dot, .stop-no { animation: land 0.3s ease-out var(--land, 0ms) backwards; }
+@keyframes land { from { opacity: 0; transform: scale(0.3); } }
 .postmark-svg { width: 100%; height: 100%; display: block; mix-blend-mode: multiply; }
 .postmark:hover .postmark-svg, .postmark:focus-visible .postmark-svg { transform: scale(1.08); transition: transform 0.25s; }
 @keyframes stamp {
@@ -207,7 +241,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .brand h1 { font-size: 30px; }
   .tagline { font-size: 17px; display: block; max-width: 190px; line-height: 1.1; }
   .range button { padding: 6px 12px; font-size: 14px; }
-  .summary { top: 112px; left: 16px; right: 16px; }
+  .summary { top: 132px; left: 16px; right: 16px; }
   .sentence { font-size: 16px; }
   .timeline { bottom: 64px; }
   .privacy { font-size: 10px; bottom: 8px; }
@@ -222,4 +256,104 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ---------- city names (appear when zoomed in) ---------- */
+.city-label {
+  pointer-events: none;
+  font-family: var(--serif); font-size: 11px; letter-spacing: 0.3px; color: var(--ink-soft);
+  text-shadow: 0 0 3px var(--paper), 0 0 2px var(--paper);
+}
+.city-label i { position: absolute; left: -2px; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: var(--ink-soft); }
+.city-label span { position: absolute; left: 5px; top: 0; transform: translateY(-52%); white-space: nowrap; }
+.city-label.major { font-size: 13px; color: var(--ink); }
+.city-label.crowded { opacity: 0; }
+
+/* ---------- home picker ---------- */
+.change-home { font-size: 13px; color: var(--vermilion); margin-left: 2px; }
+.summary { pointer-events: none; z-index: 3; }
+.summary .home-line, .home-picker { pointer-events: auto; }
+.home-picker {
+  margin-top: 12px; width: min(340px, calc(100vw - 32px)); padding: 16px 18px;
+  background: var(--page); border: 1px solid rgba(80, 60, 30, 0.18); border-radius: 6px;
+  box-shadow: 0 16px 34px -18px rgba(50, 35, 15, 0.45);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.hp-head { display: flex; justify-content: space-between; align-items: baseline; }
+.hp-head h3 { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 600; }
+.close.small { position: static; font-size: 22px; }
+.hp-label { font-size: 12px; color: var(--ink-soft); letter-spacing: 0.4px; }
+.home-picker input {
+  font: inherit; font-size: 15px; padding: 8px 10px; border-radius: 4px;
+  border: 1px solid rgba(60, 50, 40, 0.35); background: #fffdf8; color: var(--ink);
+}
+.home-picker input:focus-visible { outline: 2px solid var(--vermilion); outline-offset: 1px; }
+.hp-results { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; border-top: 1px dashed rgba(60, 50, 40, 0.25); }
+.hp-results button {
+  width: 100%; text-align: left; border: 0; background: none; padding: 7px 4px; font-size: 15px;
+  display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px dashed rgba(60, 50, 40, 0.15);
+}
+.hp-results button:hover, .hp-results button:focus-visible { background: rgba(194, 59, 34, 0.08); }
+.hp-results span { color: var(--ink-soft); font-size: 13px; }
+.hp-globe { border: 1.5px dashed var(--ink-soft); background: none; border-radius: 4px; padding: 8px; font-size: 14px; }
+.hp-globe.on { border-color: var(--vermilion); color: var(--vermilion); }
+.hp-reset { align-self: flex-start; font-size: 13px; color: var(--ink); }
+.hp-note { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-soft); }
+
+/* ---------- gouache look (overrides the base rules above) ---------- */
+:root body {
+  background-image:
+    radial-gradient(ellipse at 50% 44%, rgba(250, 248, 243, 0.95), rgba(240, 235, 225, 0.75) 68%, rgba(222, 215, 202, 0.85)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.3 0 0 0 0 0.3 0 0 0 0 0.32 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root .brand h1 { font-style: italic; font-weight: 500; font-size: 48px; letter-spacing: 0.5px; }
+:root .tagline { font-style: italic; font-size: 20px; }
+:root .sentence { font-family: var(--serif); font-size: 19px; line-height: 1.5; }
+:root .range { background: rgba(246, 242, 234, 0.8); }
+:root .tick span { font-style: italic; font-size: 18px; }
+:root .seal-svg { transform: none; filter: drop-shadow(0 1px 1px rgba(40, 40, 50, 0.18)); }
+:root .city-label { font-family: var(--serif); font-style: italic; font-size: 13px; }
+:root .city-label.major { font-size: 15px; }
+/* The logbook becomes a sketchbook: plain cream pages, wide margins, no tape or tilt. */
+:root .cover, :root .page { background-color: var(--page); background-image: none; }
+:root .page { padding: 48px 56px; }
+:root .page h2 { font-style: italic; font-weight: 500; font-size: 48px; }
+:root .kicker, :root .day-no { font-style: italic; color: var(--ink-soft); }
+:root .route .hand { font-style: italic; font-size: 17px; color: var(--ink-soft); }
+:root .book { box-shadow: 0 30px 60px -26px rgba(30, 36, 44, 0.4), 0 0 0 1px rgba(30, 36, 44, 0.1); }
+:root .collage { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 34px 30px; }
+:root .taped { padding: 0; background: none; box-shadow: none; transform: none; }
+:root .taped:hover { transform: translateY(-2px); }
+:root .taped::before { display: none; }
+:root .taped figcaption.hand { position: static; color: var(--ink-soft); text-shadow: none; font-size: 13px; font-style: italic; text-align: center; }
+.taped figcaption.title { position: static; text-shadow: none; display: block; margin-top: 10px; text-align: center; font-family: var(--serif); font-style: italic; font-size: 16px; color: var(--ink); }
+.painting-wait {
+  display: block; width: 100%; aspect-ratio: 4 / 3;
+  background: linear-gradient(100deg, #ece6da 30%, #f5f1e9 50%, #ece6da 70%) 0 0 / 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+.painting-wait.big { width: min(520px, 80vw); }
+@keyframes shimmer { to { background-position: -200% 0; } }
+.gouache-card { background: rgba(236, 231, 222, 0.94); }
+.gouache-card figure {
+  display: flex; flex-direction: column; align-items: center; gap: 22px;
+  background: #f6f2ea; padding: 36px 48px 30px; max-height: calc(100vh - 48px); overflow: auto;
+  box-shadow: 0 24px 60px -20px rgba(30, 36, 44, 0.35);
+}
+.gouache-card img { max-height: calc((100vh - 220px) / 2); max-width: min(560px, 80vw); }
+.gouache-card .original { box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.4); }
+.gouache-card figcaption { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; text-align: center; }
+.gouache-card strong { font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 500; font-size: 30px; color: #2f3a45; }
+.gouache-card figcaption span { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 15px; letter-spacing: 1px; color: #6f7680; }
+
+@media (max-width: 720px) {
+  .controls { gap: 6px; }
+  .home-picker { position: fixed; left: 16px; right: 16px; top: 120px; width: auto; z-index: 5; }
+}
+
+/* Phones: keep the long title compact and the summary clear of it. */
+@media (max-width: 720px) {
+  :root .brand h1 { font-size: 30px; }
+  :root .tagline { font-size: 15px; }
+  .summary { top: 132px; }
 }
