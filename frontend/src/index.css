@@ -98,21 +98,28 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .stamp .postmark { transform: translateX(-50%) scale(var(--zs, 1)); }
 .stamp.mini .postmark { transform: translateX(-50%) scale(0.2); opacity: 0; pointer-events: none; }
+/* Name tag: what a stamp becomes when there's no room for the whole stamp. It sits on
+   whichever side of the dot has room (set by GlobeView as data-side). */
+.stamp .tag {
+  position: absolute; left: 0; bottom: 9px; transform: translateX(-50%);
+  padding: 2px 8px; border-radius: 3px; white-space: nowrap; opacity: 0; visibility: hidden; pointer-events: none;
+  background: #f6f2ea; color: var(--trip); box-shadow: 0 0 0 1.5px var(--trip), 0 1px 3px rgba(0, 0, 0, 0.15);
+  font: italic 700 14px/18px var(--serif); cursor: pointer; transition: opacity 0.25s;
+}
+.stamp[data-side='below'] .tag { bottom: auto; top: 7px; }
+.stamp[data-side='right'] .tag { bottom: auto; top: -11px; left: 9px; transform: none; }
+.stamp[data-side='left'] .tag { bottom: auto; top: -11px; left: auto; right: 9px; transform: none; }
+.stamp.tagged .tag { opacity: 1; visibility: visible; pointer-events: auto; }
+.stamp.tagged .postmark { transform: translateX(-50%) scale(0.2); opacity: 0; pointer-events: none; }
+.stamp.tagged .tag:hover { background: #fffaf0; }
 /* The dot is the pin itself: always clickable, with a finger-sized hit area. */
 .stamp .pin-dot { pointer-events: auto; cursor: pointer; transition: transform 0.2s; }
 .stamp .pin-dot::after { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
 .stamp .pin-dot:hover { transform: scale(1.5); }
 .stamp.has-more .pin-dot, .stamp.clustered .pin-dot { pointer-events: none; }
 .stamp.clustered .pin-dot { opacity: 0.55; }
-/* A crowd of stamps (zoomed out) shows as one numbered bubble in the middle of its dots. */
-.stamp .more {
-  position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border-radius: 50%; display: none;
-  background: rgba(47, 58, 69, 0.88); color: #f6f2ea; font: 700 13px/30px var(--sans); text-align: center;
-  pointer-events: auto; cursor: zoom-in; box-shadow: 0 0 0 2px #f6f2ea, 0 2px 6px rgba(0, 0, 0, 0.2);
-}
-.stamp.has-more:not(.mini) { z-index: 2; }
-.stamp.has-more:not(.mini) .more { display: block; }
-.stamp.has-more .postmark { transform: translateX(-50%) scale(0.2); opacity: 0; pointer-events: none; }
+.stamp.has-more { z-index: 2; }
+.stamp.has-more .tag { cursor: zoom-in; }
 .seal .seal-art { width: 46px; height: 46px; bottom: 2px; }
 .seal.mini .seal-art { opacity: 0; transform: translateX(-50%) scale(0.3); pointer-events: none; }
 .stop-no {

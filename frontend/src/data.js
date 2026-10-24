@@ -96,10 +96,11 @@ export function distanceKm(a, b) {
 }
 
 // When the user picks their own home, re-estimate each trip's distance the same way the
-// backend does: home -> each city in order -> home, straight lines.
+// backend does (AGENTS.md §6): one way, home -> each city in visit order, straight lines.
+// With the detected home, the backend's own distance_km is used as is.
 export function withHome(trips, home) {
   return trips.map((t) => {
-    const path = [home, ...t.cities, home]
+    const path = [home, ...t.cities]
     let km = 0
     for (let i = 0; i < path.length - 1; i++) km += distanceKm(path[i], path[i + 1])
     return { ...t, distance_km: Math.round(km) }

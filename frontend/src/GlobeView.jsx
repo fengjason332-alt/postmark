@@ -278,7 +278,7 @@ const GlobeView = forwardRef(function GlobeView(
       const arc = arcs.find((a) => a.trip.id === first.id && a.to.id === city.id)
       // During a replay a stamp only appears once the line reaching it has arrived.
       if (landed && !landed.has(arc?.key)) continue
-      const px = Math.round(34 + 30 * Math.sqrt(city.photo_count / maxCount))
+      const px = Math.round(46 + 32 * Math.sqrt(city.photo_count / maxCount))
       // Stop number within its first trip, shown when that trip visits several cities.
       const stop = first.cities.length > 1 ? first.cities.findIndex((c) => c.id === city.id) + 1 : 0
       const signature = `${city.visits.length}:${px}:${stop}`
@@ -289,6 +289,9 @@ const GlobeView = forwardRef(function GlobeView(
         el.style.setProperty('--size', `${px}px`)
         el.style.setProperty('--trip', tripColor(first))
         el.innerHTML = `<i class="pin-dot"></i>`
+        el._tag = document.createElement('span')
+        el._tag.className = 'tag'
+        el.appendChild(el._tag)
         const button = document.createElement('button')
         button.className = 'postmark'
         button.innerHTML = postmark(city, tripColor(first)) + (stop ? `<b class="stop-no">${stop}</b>` : '')
@@ -301,10 +304,7 @@ const GlobeView = forwardRef(function GlobeView(
         el.addEventListener('pointerenter', () => { spin.current.hover = true; touch() })
         el.addEventListener('pointerleave', () => { spin.current.hover = false; touch() })
         el.appendChild(button)
-        el._more = document.createElement('b')
-        el._more.className = 'more'
-        el.appendChild(el._more)
-                d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7 }
+                d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7, tagW: 22 + city.name.length * 7.6 }
       }
       d.el._city = city
       next.set(city.id, d)
@@ -370,12 +370,14 @@ const GlobeView = forwardRef(function GlobeView(
     g.camera().updateMatrixWorld()
     const cam = g.camera().position
     const radius = g.getGlobeRadius()
-    // Stamps shrink as the camera pulls back, so far away they don't cover their neighbours.
-    const zs = Math.max(0.55, Math.min(1, 1.25 - g.pointOfView().altitude * 0.22))
+    // Stamps grow a little as you zoom in and shrink as the camera pulls back, so far away
+    // they don't cover their neighbours.
+    const zs = Math.max(0.6, Math.min(1.2, 1.3 - g.pointOfView().altitude * 0.25))
     overlay.current.style.setProperty('--zs', zs.toFixed(3))
     const placed = [] // { x, y, w, h, host } boxes already claimed on screen
     const hit = (r) => placed.find((q) => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h)
     const sorted = [...pinsRef.current].sort((a, b) => b.rank - a.rank)
+    const shown = []
     for (const p of sorted) {
       if (p.kind === 'stamp') p.el._members = []
       const c = g.getCoords(p.lat, p.lng, 0)
@@ -386,40 +388,81 @@ const GlobeView = forwardRef(function GlobeView(
       const s = g.getScreenCoords(p.lat, p.lng, 0)
       p.el.style.transform = `translate(${s.x.toFixed(1)}px, ${s.y.toFixed(1)}px)`
       p.el._xy = s
-      if (p.kind === 'label') {
-        const r = { x: s.x - 3, y: s.y - p.h / 2, w: p.w, h: p.h }
-        const crowded = !!hit(r)
-        p.el.classList.toggle('crowded', crowded)
-        if (!crowded) placed.push(r)
-      } else {
-        const w = p.kind === 'stamp' ? p.w * zs : p.w
-        const h = p.kind === 'stamp' ? p.h * zs : p.h
-        const r = { x: s.x - w / 2, y: s.y - h - 8, w, h: h + 8, host: p.kind === 'stamp' ? p : null }
-        const other = hit(r)
-        // A stamp that would cover a bigger one folds down to its dot (still clickable, still
-        // on the exact spot) and is counted on that stamp's "+N" badge instead. The home seal
-        // gives way to stamps the same way, leaving its red dot.
-        p.el.classList.toggle('mini', !!other)
-        if (p.kind === 'stamp') other?.host?.el._members.push(p.el._city)
-        placed.push(other ? { x: s.x - 6, y: s.y - 6, w: 12, h: 12, host: other.host } : r)
+      shown.push(p)
+    }
+
+    // Stamps in three steps, so names stay readable as long as possible:
+    // 1. a stamp that touches no other stamp is shown whole;
+    // 2. the others become small name tags next to their dots (above, beside or below),
+    //    biggest first, where they fit;
+    // 3. the rest fold into the stamp or tag they bump into, which becomes a numbered bubble.
+    // Dots always stay on their exact spot.
+    const overlaps = (r, q) => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h
+    const stamps = shown.filter((p) => p.kind === 'stamp')
+    for (const p of stamps) {
+      const { x, y } = p.el._xy
+      const w = p.w * zs
+      const h = p.h * zs
+      p.full = { x: x - w / 2, y: y - h - 8, w, h: h + 8, host: p }
+      const W = p.tagW
+      p.tags = [
+        ['above', { x: x - W / 2, y: y - 30, w: W, h: 30, host: p }],
+        ['right', { x: x + 8, y: y - 11, w: W, h: 22, host: p }],
+        ['left', { x: x - 8 - W, y: y - 11, w: W, h: 22, host: p }],
+        ['below', { x: x - W / 2, y: y + 6, w: W, h: 26, host: p }],
+      ]
+    }
+    const mode = new Map()
+    for (const p of stamps) {
+      if (stamps.some((q) => q !== p && overlaps(p.full, q.full))) continue
+      mode.set(p, 'full')
+      placed.push(p.full)
+    }
+    for (const p of stamps) {
+      if (mode.has(p)) continue
+      const free = p.tags.find(([, r]) => !hit(r)) // above the dot first, then beside or below it
+      if (!free) continue
+      mode.set(p, 'tag')
+      p.el.dataset.side = free[0]
+      placed.push(free[1])
+    }
+    for (const p of stamps) {
+      if (mode.has(p)) continue
+      const host = hit(p.tags[0][1])?.host ?? p
+      mode.set(p, host === p ? 'tag' : 'mini')
+      if (host === p) placed.push(p.tags[0][1])
+      else {
+        host.el._members.push(p.el._city)
+        placed.push({ x: p.el._xy.x - 6, y: p.el._xy.y - 6, w: 12, h: 12, host })
       }
     }
-    // A crowd of stamps becomes one numbered bubble in the middle of its dots; every dot
-    // stays on its exact spot, and clicking the bubble zooms in until they separate.
+    // A stamp that picked up folded neighbours shows as a tag ("Montreal +1") too.
+    for (const p of stamps) if (p.el._members.length && mode.get(p) === 'full') mode.set(p, 'tag')
+    for (const p of stamps) {
+      if (mode.get(p) === 'tag' && !p.el.dataset.side) p.el.dataset.side = 'above'
+      p.el.classList.toggle('tagged', mode.get(p) === 'tag')
+      p.el.classList.toggle('mini', mode.get(p) === 'mini')
+    }
+
+    // Then the home seal (it gives way to stamps, leaving its red dot) and map labels.
+    for (const p of shown) {
+      if (p.kind === 'stamp') continue
+      const { x, y } = p.el._xy
+      const r = p.kind === 'label' ? { x: x - 3, y: y - p.h / 2, w: p.w, h: p.h } : { x: x - p.w / 2, y: y - p.h - 8, w: p.w, h: p.h + 8 }
+      const crowded = !!hit(r)
+      p.el.classList.toggle(p.kind === 'label' ? 'crowded' : 'mini', crowded)
+      if (!crowded || p.kind === 'seal') placed.push(crowded ? { x: x - 6, y: y - 6, w: 12, h: 12 } : r)
+    }
+    // A crowd reads as its biggest city's tag plus a count ("New York +2"); the folded dots
+    // stay on their exact spots but step back, and clicking the tag zooms in until they separate.
     for (const p of sorted) if (p.kind === 'stamp') p.el.classList.remove('clustered')
-    for (const p of sorted) {
-      if (p.kind !== 'stamp') continue
+    for (const p of stamps) {
       const group = [p.el, ...p.el._members.map((c) => stampCache.current.get(c.id)?.el).filter(Boolean)]
-      const n = group.length
-      p.el.classList.toggle('has-more', n > 1)
-      // Dots tucked under the bubble step back, so the bubble is the only thing to click.
       for (const el of group.slice(1)) el.classList.add('clustered')
-      if (n < 2) continue
-      const cx = group.reduce((t, el) => t + el._xy.x, 0) / n - p.el._xy.x
-      const cy = group.reduce((t, el) => t + el._xy.y, 0) / n - p.el._xy.y
-      p.el._more.textContent = n
-      p.el._more.title = group.map((el) => el._city.name).join(' · ')
-      p.el._more.style.transform = `translate(${cx.toFixed(1)}px, ${cy.toFixed(1)}px)`
+      p.el.classList.toggle('has-more', group.length > 1)
+      const label = group.length > 1 ? `${p.el._city.name} +${group.length - 1}` : p.el._city.name
+      if (p.el._tag.textContent !== label) p.el._tag.textContent = label
+      p.el._tag.title = group.length > 1 ? group.map((el) => el._city.name).join(' · ') : ''
     }
   }
 
