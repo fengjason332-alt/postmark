@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import GlobeView from './GlobeView.jsx'
-import { filterTrips, initialStyle, loadData, sentence, setPalette, STYLES, summarize, thisYear, withHome } from './data.js'
+import { filterTrips, loadData, sentence, summarize, thisYear, withHome } from './data.js'
 import { loadCities, nearestCity } from './geoLayers.js'
-import { INK_FILTER } from './stamps.js'
+import { PAINT_FILTER } from './stamps.js'
 import Logbook from './Logbook.jsx'
 import CityPage from './CityPage.jsx'
 import Timeline from './Timeline.jsx'
@@ -34,7 +34,6 @@ export default function App() {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [range, setRange] = useState('all')
-  const [style, setStyle] = useState(initialStyle)
   const [customHome, setCustomHome] = useState(savedHome)
   const [homeOpen, setHomeOpen] = useState(false)
   const [picking, setPicking] = useState(false)
@@ -42,12 +41,6 @@ export default function App() {
   const [trip, setTrip] = useState(null)
   const [city, setCity] = useState(null)
   const globe = useRef(null)
-
-  setPalette(style)
-  useEffect(() => {
-    document.documentElement.dataset.style = style
-    store('postmark.style', style)
-  }, [style])
 
   useEffect(() => {
     loadData().then(setData).catch((e) => setError(e.message))
@@ -112,12 +105,11 @@ export default function App() {
 
   return (
     <div className="app">
-      <div dangerouslySetInnerHTML={{ __html: INK_FILTER }} />
+      <div dangerouslySetInnerHTML={{ __html: PAINT_FILTER }} />
       <GlobeView
         ref={globe}
         trips={visible}
         home={home}
-        style={style}
         picking={picking}
         onPick={pickOnGlobe}
         onTripClick={openTrip}
@@ -133,11 +125,6 @@ export default function App() {
           <div className="range" role="tablist" aria-label="Time range">
             <button role="tab" aria-selected={range === 'year'} onClick={() => { setRange('year'); setCursor(null) }}>This year</button>
             <button role="tab" aria-selected={range === 'all'} onClick={() => { setRange('all'); setCursor(null) }}>All time</button>
-          </div>
-          <div className="range small" role="tablist" aria-label="Look">
-            {Object.entries(STYLES).map(([key, s]) => (
-              <button key={key} role="tab" aria-selected={style === key} onClick={() => setStyle(key)}>{s.label}</button>
-            ))}
           </div>
         </div>
       </header>

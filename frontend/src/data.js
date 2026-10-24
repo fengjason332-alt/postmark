@@ -25,32 +25,10 @@ async function fetchJson(url) {
   return res.json()
 }
 
-// One colour per trip, cycled by trip index. Vermilion is reserved for home (and seals in ink style).
-export const STYLES = {
-  journal: { label: 'Journal', colors: ['#2f5d7c', '#8a4f7d', '#3f6f52', '#a0592d', '#4b5a92', '#8c3b4a', '#6b6a2f', '#2f7470'], border: '#3a3026' },
-  ink: { label: 'Ink wash', colors: ['#1d1d1b', '#3a4048', '#4a3b30', '#2f3f3b', '#45384a', '#2c3440'], border: '#1d1d1b' },
-  gouache: { label: 'Gouache', colors: ['#34557a', '#a8473a', '#b8862a', '#4f6b52', '#6e4a63', '#2f3a45'], border: '#3a4552' },
-}
-let palette = STYLES.journal.colors
-let activeStyle = 'journal'
-export const setPalette = (style) => {
-  activeStyle = style
-  palette = STYLES[style].colors
-}
-export const currentStyle = () => activeStyle
-export const tripColor = (trip) => palette[trip.index % palette.length]
-
-export function initialStyle() {
-  const fromUrl = new URLSearchParams(location.search).get('style')
-  if (STYLES[fromUrl]) return fromUrl
-  try {
-    const saved = localStorage.getItem('postmark.style')
-    if (STYLES[saved]) return saved
-  } catch {
-    // storage blocked: fall through to the default
-  }
-  return STYLES[import.meta.env.VITE_DEFAULT_STYLE] ? import.meta.env.VITE_DEFAULT_STYLE : 'journal'
-}
+// One colour per trip, cycled by trip index: muted gouache pigments (indigo, rust, ochre, sage...).
+export const PALETTE = ['#34557a', '#a8473a', '#b8862a', '#4f6b52', '#6e4a63', '#2f3a45']
+export const BORDER_COLOR = '#3a4552'
+export const tripColor = (trip) => PALETTE[trip.index % PALETTE.length]
 
 const R = 6371
 const rad = (d) => (d * Math.PI) / 180
@@ -119,8 +97,6 @@ export function sentence(range, s) {
   return `${who} spent ${count(s.days, 'day', 'days')} away from home, wandered through ${count(s.cities, 'city', 'cities')}${countries}, and covered about ${fmt(s.km)} km.`
 }
 
-const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
-export const stampDate = (iso) => `${MONTHS[+iso.slice(5, 7) - 1]} ${+iso.slice(8, 10)}`
 export const dotDate = (iso) => iso.replaceAll('-', '.')
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 export const shortDate = (iso) => `${MONTH_NAMES[+iso.slice(5, 7) - 1]} ${+iso.slice(8, 10)}`

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { shortDate, dateRange, jitter, photosByDay, tripColor } from './data.js'
 import { postmark } from './stamps.js'
-import { citiesOf, currentStyle } from './data.js'
+import { citiesOf } from './data.js'
 import { paintingTitle, usePainting } from './painterly.js'
 
 // A trip opens as a two-page journal: cover on the left, days of taped photos on the right.
@@ -39,7 +39,7 @@ export default function Logbook({ trip, base, onClose }) {
               </li>
             ))}
           </ol>
-          <div className="cover-stamp" dangerouslySetInnerHTML={{ __html: postmark(citiesOf([trip])[0], color, currentStyle()) }} />
+          <div className="cover-stamp" dangerouslySetInnerHTML={{ __html: postmark(citiesOf([trip])[0], color) }} />
         </section>
 
         <section className="page days">
@@ -55,7 +55,7 @@ export default function Logbook({ trip, base, onClose }) {
                 {day.photos.map((p) => (
                   <figure key={p.id} className="taped" style={{ '--tilt': `${jitter(p.id, 3)}deg` }} onClick={() => setPhoto(p)}>
                     <Picture src={base + p.thumb} alt={`${shortDate(p.date)} ${cityName[p.city_id] ?? ''}`} loading="lazy" />
-                    {currentStyle() === 'gouache' && <figcaption className="title">{paintingTitle(p)}</figcaption>}
+                    <figcaption className="title">{paintingTitle(p)}</figcaption>
                     {!p.has_gps && <figcaption className="hand">no location</figcaption>}
                   </figure>
                 ))}
@@ -86,29 +86,15 @@ function RouteSketch({ photos, color }) {
   )
 }
 
-// In the gouache style a photo is shown as a small painting made from it on this device.
+// Photos are shown as small paintings made from them on this device.
 export function Picture({ src, alt, ...rest }) {
-  const gouache = currentStyle() === 'gouache'
-  const painted = usePainting(src, gouache)
-  if (!gouache) return <img src={src} alt={alt} {...rest} />
+  const painted = usePainting(src)
   return painted ? <img src={painted} alt={alt} {...rest} /> : <span className="painting-wait" role="img" aria-label={alt} />
 }
 
+// The photo on top and the painting made from it below, like a page from a sketchbook.
 export function Lightbox({ photo, base, place, onClose }) {
   const time = photo.taken_at.slice(11, 16)
-  if (currentStyle() === 'gouache') return <PaintingCard photo={photo} base={base} place={place} time={time} onClose={onClose} />
-  return (
-    <div className="lightbox" onClick={(e) => { e.stopPropagation(); onClose() }}>
-      <figure>
-        <img src={base + photo.full} alt="" />
-        <figcaption className="hand">{shortDate(photo.date)}, {time} {place ? `· ${place}` : '· no location'}</figcaption>
-      </figure>
-    </div>
-  )
-}
-
-// The photo on top and the painting made from it below, like a page from a sketchbook.
-function PaintingCard({ photo, base, place, time, onClose }) {
   const painted = usePainting(base + photo.full)
   return (
     <div className="lightbox gouache-card" onClick={(e) => { e.stopPropagation(); onClose() }}>

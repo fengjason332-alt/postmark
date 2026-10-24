@@ -3,37 +3,28 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import Globe from 'react-globe.gl'
 import { MeshPhongMaterial } from 'three'
-import { makeGlobeTexture, makeGouacheTexture, makeInkTexture } from './globeTexture.js'
+import { makeGlobeTexture } from './globeTexture.js'
 import { homeSeal, postmark } from './stamps.js'
-import { citiesOf, STYLES, tripColor } from './data.js'
+import { BORDER_COLOR, citiesOf, tripColor } from './data.js'
 import { angularDistance, createBorderLayers, loadCities, visibleCities } from './geoLayers.js'
 
 const DRAW_MS = 1100 // how long one ink line takes to write itself
 const STAGGER_MS = 650 // gap between consecutive trips when several appear at once
 const isPhone = () => window.innerWidth < 720
-const textures = {}
-const PAINTERS = { journal: makeGlobeTexture, ink: makeInkTexture, gouache: makeGouacheTexture }
-const textureFor = (style) => (textures[style] ??= PAINTERS[style]())
-
-// Per-style globe look: halo colour and size, arc colours (start, end alpha) and line weight.
-const LOOK = {
-  journal: { halo: '#cbbf9f', haloSize: 0.11, alpha: ['ee', 'cc'], stroke: 0.42, fog: 1 },
-  ink: { halo: '#bfbcb2', haloSize: 0.16, alpha: ['f0', '88'], stroke: 0.5, fog: 1.25 },
-  gouache: { halo: '#c9cdd0', haloSize: 0.13, alpha: ['f4', 'dd'], stroke: 0.55, fog: 1.1 },
-}
+let texture = null // painted once, on first use
 
 // Fog and blur only appear when the camera is pulled far back: clear at the default view
 // and closer, thickening from altitude 2.6 to the zoom-out limit (~5).
-function applyFog(el, altitude, style) {
+function applyFog(el, altitude) {
   if (!el) return // the camera can report in before the wrapper is mounted
   const t = Math.max(0, Math.min(1, (altitude - 2.6) / 2.4))
-  const strength = LOOK[style].fog
-  el.style.setProperty('--fog-blur', `${(t * 2.6 * strength).toFixed(2)}px`)
-  el.style.setProperty('--fog-wash', (t * 0.55 * strength).toFixed(3))
+  // No filter at all when clear: even blur(0px) makes the browser re-composite the canvas every frame.
+  el.style.setProperty('--fog-filter', t > 0 ? `blur(${(t * 2.8).toFixed(2)}px)` : 'none')
+  el.style.setProperty('--fog-wash', (t * 0.6).toFixed(3))
 }
 
 const GlobeView = forwardRef(function GlobeView(
-  { trips, home, style, picking, onPick, onTripClick, onCityClick },
+  { trips, home, picking, onPick, onTripClick, onCityClick },
   ref,
 ) {
   const globe = useRef()
@@ -44,9 +35,7 @@ const GlobeView = forwardRef(function GlobeView(
   const [labels, setLabels] = useState([])
   const cities = useRef(null)
   const lastLabelPov = useRef(null)
-  const styleRef = useRef(style)
-  styleRef.current = style
-  const texture = useMemo(() => textureFor(style), [style])
+  const globeImage = useMemo(() => (texture ??= makeGlobeTexture()), [])
   const material = useMemo(() => new MeshPhongMaterial({ shininess: 0 }), []) // matte paper, no glare
   const arcCache = useRef(new Map()) // key -> arc datum, kept so existing lines don't redraw
   const stampCache = useRef(new Map()) // city id -> html datum
@@ -83,14 +72,10 @@ const GlobeView = forwardRef(function GlobeView(
 
   useEffect(() => () => borders.current?.dispose(), [])
 
-  useEffect(() => {
-    borders.current?.setColor(STYLES[style].border)
-    if (globe.current) applyFog(wrap.current, globe.current.pointOfView().altitude, style)
-  }, [style])
 
   function onReady() {
     const g = globe.current
-    if (!g) return
+    if (!g || borders.current) return // globe.gl can report ready more than once; set up only once
     const controls = g.controls()
     controls.autoRotate = true
     controls.autoRotateSpeed = 0.35
@@ -99,9 +84,9 @@ const GlobeView = forwardRef(function GlobeView(
     controls.zoomSpeed = 0.8
     const altitude = isPhone() ? 3.6 : 2.3
     g.pointOfView({ lat: home.lat - 8, lng: home.lng, altitude }, 0)
-    borders.current = createBorderLayers(g.scene(), g.getGlobeRadius(), STYLES[styleRef.current].border)
+    borders.current = createBorderLayers(g.scene(), g.getGlobeRadius(), BORDER_COLOR)
     borders.current.setAltitude(altitude)
-    applyFog(wrap.current, altitude, styleRef.current)
+    applyFog(wrap.current, altitude)
     loadCities().then((list) => {
       cities.current = list
       onView(g.pointOfView())
@@ -111,7 +96,7 @@ const GlobeView = forwardRef(function GlobeView(
   // Called on every camera change (including auto-rotation), so it only touches the DOM
   // directly and re-renders labels when the view has moved enough to matter.
   function onView(pov) {
-    applyFog(wrap.current, pov.altitude, styleRef.current)
+    applyFog(wrap.current, pov.altitude)
     borders.current?.setAltitude(pov.altitude)
     if (!cities.current) return
     const last = lastLabelPov.current
@@ -154,7 +139,7 @@ const GlobeView = forwardRef(function GlobeView(
     for (const city of visited) {
       const first = city.visits[0].trip
       const px = Math.round(38 + 42 * Math.sqrt(city.photo_count / maxCount))
-      const signature = `${city.visits.length}:${px}:${style}`
+      const signature = `${city.visits.length}:${px}`
       let d = stampCache.current.get(city.id)
       if (!d || d.signature !== signature) {
         // The outer element is positioned by globe.gl; the inner button does the stamping animation.
@@ -163,7 +148,7 @@ const GlobeView = forwardRef(function GlobeView(
         const button = document.createElement('button')
         button.className = 'postmark'
         button.style.setProperty('--size', `${px}px`)
-        button.innerHTML = postmark(city, tripColor(first), style)
+        button.innerHTML = postmark(city, tripColor(first))
         button.addEventListener('click', (e) => {
           e.stopPropagation()
           handlers.current.onCityClick(el._city)
@@ -178,15 +163,15 @@ const GlobeView = forwardRef(function GlobeView(
     }
     stampCache.current = next
     return [...next.values()]
-  }, [trips, arcs, style])
+  }, [trips, arcs])
 
   const seal = useMemo(() => {
     const el = document.createElement('div')
     el.className = 'marker seal'
     el.title = `Home · ${home.city}`
-    el.innerHTML = homeSeal(home.city, style)
+    el.innerHTML = homeSeal(home.city)
     return { id: 'home', lat: home.lat, lng: home.lng, el }
-  }, [home, style])
+  }, [home])
 
   // Small map labels for nearby cities; visited cities already have a stamp, so skip them.
   const labelData = useMemo(() => {
@@ -227,7 +212,6 @@ const GlobeView = forwardRef(function GlobeView(
 
   // A new accessor identity each tick tells react-globe.gl to re-read the gaps.
   const dashGap = useMemo(() => (d) => d.gap, [tick]) // eslint-disable-line react-hooks/exhaustive-deps
-  const look = LOOK[style]
 
   return (
     <div className={`globe ${picking ? 'picking' : ''}`} ref={wrap}>
@@ -240,18 +224,18 @@ const GlobeView = forwardRef(function GlobeView(
         onZoom={onView}
         onGlobeClick={(pt) => picking && onPick(pt)}
         backgroundColor="rgba(0,0,0,0)"
-        globeImageUrl={texture}
+        globeImageUrl={globeImage}
         globeMaterial={material}
         showAtmosphere
-        atmosphereColor={look.halo}
-        atmosphereAltitude={look.haloSize}
+        atmosphereColor="#c9cdd0"
+        atmosphereAltitude={0.13}
         arcsData={arcs}
         arcStartLat={(d) => d.from.lat}
         arcStartLng={(d) => d.from.lng}
         arcEndLat={(d) => d.to.lat}
         arcEndLng={(d) => d.to.lng}
-        arcColor={(d) => look.alpha.map((a) => tripColor(d.trip) + a)}
-        arcStroke={look.stroke}
+        arcColor={(d) => [tripColor(d.trip) + 'f4', tripColor(d.trip) + 'dd']}
+        arcStroke={0.55}
         arcAltitudeAutoScale={0.32}
         arcDashLength={1}
         arcDashGap={2}
