@@ -9,3 +9,7 @@ data/
 node_modules/
 __pycache__/
 .venv/
+
+# Real photo data stays local (AGENTS.md)
+frontend/public/data/
+dist/
