@@ -158,7 +158,8 @@ const GlobeView = forwardRef(function GlobeView(
         const button = document.createElement('button')
         button.className = 'postmark'
         button.innerHTML = postmark(city, tripColor(first)) + (stop ? `<b class="stop-no">${stop}</b>` : '')
-        button.addEventListener('click', (e) => {
+        // Listen on the whole pin so a folded stamp's dot is clickable too.
+        el.addEventListener('click', (e) => {
           e.stopPropagation()
           handlers.current.onCityClick(el._city)
         })
@@ -185,7 +186,8 @@ const GlobeView = forwardRef(function GlobeView(
   // Small map labels for nearby cities; visited cities already have a stamp, so skip them.
   const labelData = useMemo(() => {
     const stamped = new Set(markers.map((m) => `${m.lat.toFixed(1)},${m.lng.toFixed(1)}`))
-    return labels
+    const next = new Map() // only labels in view are kept, so the cache doesn't grow while panning
+    const list = labels
       .filter((c) => !stamped.has(`${c.lat.toFixed(1)},${c.lng.toFixed(1)}`) && Math.abs(c.lat - home.lat) + Math.abs(c.lng - home.lng) > 0.15)
       .map((c) => {
         const key = `${c.name}|${c.lat}|${c.lng}`
@@ -196,10 +198,12 @@ const GlobeView = forwardRef(function GlobeView(
           el.innerHTML = `<i></i><span>${c.name}</span>`
           const font = c.population >= 2e6 ? 8.2 : 7.2 // rough width per character, in px
           d = { key, lat: c.lat, lng: c.lng, el, kind: 'label', rank: c.population, w: 10 + c.name.length * font, h: 16 }
-          labelCache.current.set(key, d)
         }
+        next.set(key, d)
         return d
       })
+    labelCache.current = next
+    return list
   }, [labels, markers, home])
 
   // Pins live in our own layer on top of the canvas. Elements are added once and then
@@ -223,6 +227,8 @@ const GlobeView = forwardRef(function GlobeView(
   function layoutPins() {
     const g = globe.current
     if (!g || !overlay.current) return
+    // The camera reports changes before it renders, so refresh its matrices first or pins trail a frame.
+    g.camera().updateMatrixWorld()
     const cam = g.camera().position
     const radius = g.getGlobeRadius()
     const placed = []

@@ -86,7 +86,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   pointer-events: auto; transition: transform 0.25s, opacity 0.25s;
 }
 .stamp.mini .postmark { transform: translateX(-50%) scale(0.2); opacity: 0; pointer-events: none; }
-.stamp.mini .pin-dot { pointer-events: auto; }
+.stamp.mini .pin-dot { pointer-events: auto; cursor: pointer; }
 .seal .seal-art { width: 46px; height: 46px; bottom: 2px; }
 .stop-no {
   position: absolute; top: 4px; left: -2px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
@@ -99,7 +99,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: var(--size); height: var(--size);
   display: block; border: 0; padding: 0; background: none;
 }
-.postmark-svg { animation: stamp 0.55s cubic-bezier(0.3, 1.6, 0.5, 1) both; animation-delay: inherit; }
+.postmark-svg { animation: stamp 0.55s cubic-bezier(0.3, 1.6, 0.5, 1) backwards; animation-delay: inherit; }
 .postmark-svg { width: 100%; height: 100%; display: block; mix-blend-mode: multiply; }
 .postmark:hover .postmark-svg, .postmark:focus-visible .postmark-svg { transform: scale(1.08); transition: transform 0.25s; }
 @keyframes stamp {
