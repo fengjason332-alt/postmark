@@ -234,7 +234,7 @@ Read photo metadata (replace `jason` with the person's name) / 读取照片元�
 exiftool -csv -n -r -ext heic -ext jpg -ext jpeg -FileName -DateTimeOriginal -OffsetTimeOriginal -GPSLatitude -GPSLongitude -ImageWidth -ImageHeight data/raw/jason/ > data/raw/photos_raw_jason.csv
 ```
 
-City database / 城市数据库：`cities15000.zip` from https://download.geonames.org/export/dump/ → unzip into `data/geonames/` (CC BY 4.0, credit GeoNames).
+City database / 城市数据库：`cities5000.zip` + `countryInfo.txt` from https://download.geonames.org/export/dump/ → unzip into `data/geonames/` (CC BY 4.0, credit GeoNames).
 
 ### Algorithm defaults / 算法默认参数 (tune with `validate.py`)
 
