@@ -12,6 +12,7 @@ import { angularDistance, createBorderLayers, createHomeRing, loadCities, visibl
 const FADED = 0.16 // how bright a leg stays once the route has moved on
 const REST = 0.55 // brightness of every route once all legs have flown
 const DIMMED = 0.45 // while a trip is hovered, the other routes step back to this share of their brightness
+const SPIN_RESUME_MS = 1200 // the idle spin turns again this long after the user lets go of the globe
 // Route line styles; ?line=pencil or ?line=stitch in the URL tries the others.
 // Stroke 0.6 keeps every line thick enough to hover and click.
 const LINES = {
@@ -97,12 +98,12 @@ const GlobeView = forwardRef(function GlobeView(
     g.pointOfView({ lat: a.from.lat + (a.to.lat - a.from.lat) * 0.6, lng, altitude }, ms)
   }
 
-  // Idle spin: the globe turns slowly only until the user first interacts with it. The first
-  // press, drag, zoom or click (or a camera flight it asks for) stops it for good, so from then
-  // on the globe stays exactly where the user leaves it. Hovering a pin or a line only pauses
+  // Idle spin: the globe turns slowly until the user interacts with it. A press, drag, zoom or
+  // click (or a camera flight it asks for) stops it while the pointer stays on the globe, and it
+  // turns again once the pointer leaves. Hovering a pin or a line only pauses
   // it, so the target holds still to be clicked. App can switch it off too (e.g. while a page
   // is open or a home is being picked).
-  const spin = useRef({ allowed: true, hover: false, arcHover: false, touched: false, replay: false })
+  const spin = useRef({ allowed: true, hover: false, arcHover: false, touched: false, replay: false, lastTouch: 0, pressed: false })
   spin.current.replay = follow // only while the replay is actually playing, not when paused on the bar
   function halt() {
     const controls = globe.current?.controls()
@@ -110,6 +111,7 @@ const GlobeView = forwardRef(function GlobeView(
   }
   function touch() {
     spin.current.touched = true
+    spin.current.lastTouch = Date.now()
     halt()
   }
   function setRotating(on) {
@@ -123,9 +125,11 @@ const GlobeView = forwardRef(function GlobeView(
       const s = spin.current
       const controls = g.controls()
       if (s.touched) {
-        controls.autoRotate = false
-        clearInterval(id) // the user has taken over; the spin never comes back
-        return
+        if (s.pressed || Date.now() - s.lastTouch < SPIN_RESUME_MS) {
+          controls.autoRotate = false // the user is holding or just let go of the globe
+          return
+        }
+        s.touched = false // let go long enough ago: the idle spin comes back
       }
       if (s.hover && !overlay.current?.querySelector('.pin:hover')) s.hover = false // pin went away under the pointer
       const altitude = g.pointOfView().altitude
@@ -179,6 +183,7 @@ const GlobeView = forwardRef(function GlobeView(
       const on = !!g.toGlobeCoords(x, y)
       if (on === over) return
       over = on
+      if (!on && !spin.current.pressed) spin.current.touched = false // pointer moved off the sphere: spin right away
       el.classList.toggle('touched', on)
       if (on) {
         sp.setRim(rimOnScreen())
@@ -187,6 +192,7 @@ const GlobeView = forwardRef(function GlobeView(
     }
     const out = () => {
       over = false
+      spin.current.touched = false // spin again once the cursor leaves the globe
       el.classList.remove('touched')
       sp.leave()
     }
@@ -217,7 +223,16 @@ const GlobeView = forwardRef(function GlobeView(
     if (!g || borders.current) return // globe.gl can report ready more than once; set up only once
     const controls = g.controls()
     controls.addEventListener('start', touch) // user starts dragging or zooming
-    wrap.current.addEventListener('pointerdown', touch)
+    wrap.current.addEventListener('pointerdown', () => {
+      spin.current.pressed = true
+      touch()
+    })
+    const release = () => {
+      spin.current.pressed = false
+      spin.current.lastTouch = Date.now()
+    }
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
     wrap.current.addEventListener('wheel', touch, { passive: true })
     controls.autoRotateSpeed = 0.35
     controls.minDistance = 112 // close enough to read town names
