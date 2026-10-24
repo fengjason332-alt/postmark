@@ -47,6 +47,16 @@ Pipeline counts for this run: 277 photos in, 258 after cleaning, 225 with GPS.
 - On the real GPS-less photos it filled only 2 of 33: they have no GPS photo within an hour. Accurate, but small gain.
 - Backend now has `geocode.py` (city names). Still missing for real data on the globe: `build_json.py`.
 
+### CLIP photo tags (P1)
+
+- `backend/tag_clip.py` tags each photo with up to two labels using CLIP, run fully locally (only the model weights are downloaded; photos never leave the laptop).
+- Needs `torch` and `open_clip_torch`; Jason agreed to add them to `backend/requirements.txt`.
+- Run on one person's 258 photos (`results/tag_counts.csv`): people 47%, food 19%, landmark 18%, indoors 11%, city 7%, nature 5%, night 3%, beach 0.4% (shares sum above 100% because of two tags per photo).
+- The "people" tag lets the public demo leave out photos with people.
+- Tag accuracy has not been measured (no labeled tags), so no accuracy number is claimed.
+- Backend also added `thumbnails.py`; still missing for real data on the globe: `build_json.py`.
+- Draft slides for the pitch exist (private Artifact), with every number taken from `results/`.
+
 ### Next
 - Jason: count one-day trips; make the distance radius configurable instead of a fixed 100 km.
 - DS: re-run validation after his push; compare several radius values.
