@@ -33,6 +33,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 .app { position: relative; height: 100%; }
+/* The globe screen behaves like an app: dragging it shouldn't highlight labels or drag images.
+   Text fields stay editable, and the logbook keeps its text selectable for copying. */
+.app { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.app img { -webkit-user-drag: none; }
+.app input, .app textarea, .overlay { -webkit-user-select: text; user-select: text; }
 .globe { position: absolute; inset: 0; isolation: isolate; z-index: 0; } /* keep map labels under overlays */
 .globe canvas {
   outline: none;
