@@ -1,3 +1,11 @@
 person,method,threshold_km,n_pred,n_true,true_pos,precision,recall,f1
-kunal,ours,100,1,4,0,0.0,0.0,0.0
+kunal,ours,10,3,4,2,0.667,0.5,0.571
+kunal,baseline,10,3,4,2,0.667,0.5,0.571
+kunal,ours,25,3,4,2,0.667,0.5,0.571
+kunal,baseline,25,3,4,2,0.667,0.5,0.571
+kunal,ours,100,3,4,2,0.667,0.5,0.571
 kunal,baseline,100,3,4,2,0.667,0.5,0.571
+kunal,ours,200,3,4,2,0.667,0.5,0.571
+kunal,baseline,200,3,4,2,0.667,0.5,0.571
+kunal,ours,50,3,4,2,0.667,0.5,0.571
+kunal,baseline,50,3,4,2,0.667,0.5,0.571
