@@ -5,15 +5,15 @@ import Globe from 'react-globe.gl'
 import { MeshPhongMaterial } from 'three'
 import { makeGlobeTexture } from './globeTexture.js'
 import { homeSeal, postmark } from './stamps.js'
-import { BORDER_COLOR, citiesOf, tripColor } from './data.js'
+import { BORDER_COLOR, citiesOf, DRAW_MS, distanceKm, PAUSE_MS, tripColor } from './data.js'
 import { angularDistance, createBorderLayers, loadCities, visibleCities } from './geoLayers.js'
 
-const DRAW_MS = 1700 // how long one leg of a trip takes to draw itself
-const PAUSE_MS = 600 // rest at each city (the stamp lands) before the next leg starts
 const TRAVEL_MS = 3200 // the travelling dot's time per leg, pause included
 const DOT = 0.07 // the travelling dot's length, as a share of the leg
+const FADED = 0.16 // how bright a leg stays once the route has moved on
 const isPhone = () => window.innerWidth < 720
 let texture = null // painted once, on first use
+const hexAlpha = (hex, a) => hex + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, '0')
 
 // Fog and blur only appear when the camera is pulled far back: clear at the default view
 // and closer, thickening from altitude 2.6 to the zoom-out limit (~5).
@@ -26,7 +26,7 @@ function applyFog(el, altitude) {
 }
 
 const GlobeView = forwardRef(function GlobeView(
-  { trips, home, picking, onPick, onTripClick, onCityClick },
+  { trips, home, follow, picking, onPick, onTripClick, onCityClick },
   ref,
 ) {
   const globe = useRef()
@@ -44,6 +44,8 @@ const GlobeView = forwardRef(function GlobeView(
   const stampCache = useRef(new Map()) // city id -> html datum
   const labelCache = useRef(new Map())
   const handlers = useRef({})
+  const followRef = useRef(follow)
+  followRef.current = follow
   handlers.current = { onCityClick }
 
   useImperativeHandle(ref, () => ({
@@ -60,6 +62,17 @@ const GlobeView = forwardRef(function GlobeView(
     },
     setRotating,
   }))
+
+  // Turn the camera toward a leg: centred between its two ends, pulled back for long hops.
+  function followLeg(a) {
+    const g = globe.current
+    if (!g) return
+    setRotating(false)
+    const km = distanceKm(a.from, a.to)
+    const altitude = Math.min(2.2, Math.max(0.55, 0.45 + km / 2500))
+    const lng = a.to.lng + (((a.from.lng - a.to.lng + 540) % 360) - 180) * 0.6
+    g.pointOfView({ lat: a.to.lat + (a.from.lat - a.to.lat) * 0.6, lng, altitude }, DRAW_MS)
+  }
 
   function setRotating(on) {
     const controls = globe.current?.controls()
@@ -260,32 +273,42 @@ const GlobeView = forwardRef(function GlobeView(
     }
   }
 
-  // One animation loop: ease each leg's dash offset from 1 (hidden) to 0 (drawn), and move
-  // each fully drawn trip's travelling dot. Runs at full rate while lines are drawing and
-  // at ~30 fps afterwards, which is plenty for one small dot.
+  // One animation loop. Legs draw one after another; only the leg being drawn (or, once
+  // everything is drawn, the leg the travelling dot is on) stays bright, and earlier legs
+  // fade back like a meteor's tail, so the route reads one step at a time.
+  // Runs at full rate while lines are drawing and at ~30 fps afterwards.
   useEffect(() => {
     let raf = 0
     let last = 0
+    const order = [...arcs].sort((x, y) => x.born - y.born)
     const step = (now) => {
       raf = requestAnimationFrame(step)
       let drawing = false
-      const done = new Map() // trip id -> time its last leg finished
-      for (const a of arcs) {
+      let active = null
+      for (const a of order) {
         const t = Math.min(1, Math.max(0, (now - a.born) / DRAW_MS))
         a.gap = Math.pow(1 - t, 3)
         if (t < 1) drawing = true
-        if (a.leg === a.legs - 1) done.set(a.trip.id, t < 1 ? null : a.born + DRAW_MS)
-      }
-      for (const a of arcs) {
-        const end = done.get(a.trip.id)
+        if (now >= a.born) active = a // the most recent leg to start
+        // During a replay the camera follows each leg as it starts drawing.
+        if (!a.followed && now >= a.born) {
+          a.followed = true
+          if (followRef.current && t < 1) followLeg(a)
+        }
         a.dot.on = false
-        if (end == null) continue
-        const time = (now - end) % (a.legs * TRAVEL_MS)
-        const leg = Math.floor(time / TRAVEL_MS)
-        if (leg !== a.leg) continue
-        const p = Math.min(1, (time - leg * TRAVEL_MS) / (TRAVEL_MS - PAUSE_MS))
-        a.dot.on = p < 1
-        a.dot.offset = 1 - p * (1 + DOT)
+      }
+      // All drawn: a dot travels every leg in date order, lighting each leg as it goes.
+      const finished = !drawing && order.length ? order[order.length - 1].born + DRAW_MS : null
+      if (finished !== null) {
+        const time = (now - finished) % (order.length * TRAVEL_MS)
+        active = order[Math.floor(time / TRAVEL_MS)]
+        const p = Math.min(1, (time % TRAVEL_MS) / (TRAVEL_MS - PAUSE_MS))
+        active.dot.on = p < 1
+        active.dot.offset = 1 - p * (1 + DOT)
+      }
+      for (const a of order) {
+        const target = a === active ? 1 : now >= a.born ? FADED : 1
+        a.glow = a.glow === undefined ? target : a.glow + (target - a.glow) * 0.08
       }
       if (!drawing && now - last < 33) return
       last = now
@@ -295,11 +318,18 @@ const GlobeView = forwardRef(function GlobeView(
     return () => cancelAnimationFrame(raf)
   }, [arcs])
 
-  // Lines, plus the travelling dot on the leg each trip is currently on.
+  // Lines, plus the travelling dot on the lit leg.
   const arcData = useMemo(
     () => [...arcs, ...arcs.filter((a) => a.dot.on).map((a) => a.dot)],
     [arcs, tick], // eslint-disable-line react-hooks/exhaustive-deps
   )
+  // Each leg's colour carries its current brightness; a new identity each tick re-reads it.
+  const arcColor = useMemo(() => (d) => {
+    if (d.isDot) return ['#fbf7ee', '#fbf7ee']
+    const c = tripColor(d.trip)
+    const glow = d.glow ?? 1
+    return [hexAlpha(c, glow * 0.96), hexAlpha(c, glow * (d.homeward ? 0.6 : 0.86))]
+  }, [tick]) // eslint-disable-line react-hooks/exhaustive-deps
   // A new accessor identity each tick tells react-globe.gl to re-read the offsets.
   const dashGap = useMemo(() => (d) => (d.isDot ? d.offset : d.gap), [tick]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -324,7 +354,7 @@ const GlobeView = forwardRef(function GlobeView(
         arcStartLng={(d) => d.from.lng}
         arcEndLat={(d) => d.to.lat}
         arcEndLng={(d) => d.to.lng}
-        arcColor={(d) => (d.isDot ? ['#fbf7ee', '#fbf7ee'] : d.homeward ? [tripColor(d.trip) + '99', tripColor(d.trip) + '99'] : [tripColor(d.trip) + 'f4', tripColor(d.trip) + 'dd'])}
+        arcColor={arcColor}
         arcStroke={(d) => (d.isDot ? 0.9 : 0.55)}
         arcAltitudeAutoScale={0.32}
         arcDashLength={(d) => (d.isDot ? DOT : 1)}

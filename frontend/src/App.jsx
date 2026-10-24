@@ -38,6 +38,7 @@ export default function App() {
   const [homeOpen, setHomeOpen] = useState(false)
   const [picking, setPicking] = useState(false)
   const [cursor, setCursor] = useState(null) // ISO date; trips starting after it are hidden
+  const [playing, setPlaying] = useState(false) // timeline replay running: the globe follows the lines
   const [trip, setTrip] = useState(null)
   const [city, setCity] = useState(null)
   const globe = useRef(null)
@@ -110,6 +111,7 @@ export default function App() {
         ref={globe}
         trips={visible}
         home={home}
+        follow={playing}
         picking={picking}
         onPick={pickOnGlobe}
         onTripClick={openTrip}
@@ -118,8 +120,8 @@ export default function App() {
 
       <header className="masthead">
         <div className="brand">
-          <h1>Postmark</h1>
-          <span className="tagline">your camera roll, bound into a travel journal</span>
+          <h1>Unfolding Memories</h1>
+          <span className="tagline">Postmark · your camera roll, unfolded into a travel journal</span>
         </div>
         <div className="controls">
           <div className="range" role="tablist" aria-label="Time range">
@@ -149,7 +151,7 @@ export default function App() {
         )}
       </section>
 
-      <Timeline trips={inRange} cursor={cursor} onCursor={setCursor} onOpen={openTrip} />
+      <Timeline trips={inRange} cursor={cursor} onCursor={setCursor} onOpen={openTrip} onPlaying={setPlaying} />
 
       <footer className="privacy">
         Photos are processed only on your own computer · Home is shown at city level only · Map data: GeoNames (CC BY 4.0), Natural Earth

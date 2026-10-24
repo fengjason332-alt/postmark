@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { dotDate, tripColor } from './data.js'
+import { dotDate, tripColor, tripDrawMs } from './data.js'
 
 const DAY = 86400000
 const toDay = (iso) => Math.round(new Date(iso + 'T00:00:00Z').getTime() / DAY)
 const fromDay = (n) => new Date(n * DAY).toISOString().slice(0, 10)
 
-// Bottom timeline: drag to replay trips in order, or press play to watch the lines fly out.
-export default function Timeline({ trips, cursor, onCursor, onOpen }) {
-  const [playing, setPlaying] = useState(false)
+// Bottom timeline: drag to replay trips in order, or press play to watch them unfold one by one.
+export default function Timeline({ trips, cursor, onCursor, onOpen, onPlaying }) {
+  const [playing, setPlayingState] = useState(false)
+  const setPlaying = (p) => {
+    const next = typeof p === 'function' ? p(playing) : p
+    setPlayingState(next)
+    onPlaying(next)
+  }
   const timer = useRef(0)
   if (!trips.length) return <div className="timeline empty" />
 
@@ -53,29 +58,48 @@ export default function Timeline({ trips, cursor, onCursor, onOpen }) {
           <span>{dotDate(trips[trips.length - 1].end_date)}</span>
         </div>
       </div>
-      <Player playing={playing} min={min} max={max} onCursor={onCursor} onDone={() => setPlaying(false)} timer={timer} />
+      <Player playing={playing} trips={trips} min={min} max={max} onCursor={onCursor} onDone={() => setPlaying(false)} timer={timer} />
     </div>
   )
 }
 
-// Runs the replay: a blank globe, then each trip's ink line in date order over ~9 seconds.
-function Player({ playing, min, max, onCursor, onDone, timer }) {
+// Runs the replay in date order: the cursor walks the real calendar, stopping on each
+// trip for as long as its lines take to draw (the globe follows them), then moves on.
+const GAP_MS = 1400 // time spent travelling the calendar between two trips
+
+function Player({ playing, trips, min, max, onCursor, onDone, timer }) {
   useEffect(() => {
     if (!playing) return
+    // Segments of [fromDay, toDay, durationMs]: the gap before each trip, then the trip itself.
+    const segments = []
+    let day = min
+    for (const t of trips) {
+      const s = toDay(t.start_date)
+      const e = toDay(t.end_date)
+      segments.push([day, s, GAP_MS], [s, e, tripDrawMs(t)])
+      day = e
+    }
+    segments.push([day, max, GAP_MS])
+    const total = segments.reduce((sum, seg) => sum + seg[2], 0)
     const start = performance.now()
-    const total = 9000
-    onCursor(fromDay(min))
+    let shown = null
     const step = () => {
-      const t = Math.min(1, (performance.now() - start) / total)
-      const day = Math.round(min + (max - min) * t)
-      if (t >= 1) {
+      let elapsed = performance.now() - start
+      if (elapsed >= total) {
         onCursor(null)
         onDone()
         return
       }
-      onCursor(fromDay(day))
+      let seg = segments[0]
+      for (seg of segments) {
+        if (elapsed < seg[2]) break
+        elapsed -= seg[2]
+      }
+      const iso = fromDay(Math.round(seg[0] + (seg[1] - seg[0]) * Math.min(1, elapsed / seg[2])))
+      if (iso !== shown) onCursor((shown = iso))
       timer.current = requestAnimationFrame(step)
     }
+    onCursor(fromDay(min))
     timer.current = requestAnimationFrame(step)
     return () => cancelAnimationFrame(timer.current)
   }, [playing]) // eslint-disable-line react-hooks/exhaustive-deps

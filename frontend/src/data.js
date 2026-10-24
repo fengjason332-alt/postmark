@@ -30,6 +30,11 @@ export const PALETTE = ['#34557a', '#a8473a', '#b8862a', '#4f6b52', '#6e4a63', '
 export const BORDER_COLOR = '#3a4552'
 export const tripColor = (trip) => PALETTE[trip.index % PALETTE.length]
 
+// Trip line timing, shared by the globe (drawing) and the timeline replay (pacing).
+export const DRAW_MS = 1700 // how long one leg of a trip takes to draw itself
+export const PAUSE_MS = 600 // rest at each city (the stamp lands) before the next leg starts
+export const tripDrawMs = (trip) => (trip.cities.length + 1) * (DRAW_MS + PAUSE_MS)
+
 const R = 6371
 const rad = (d) => (d * Math.PI) / 180
 export function distanceKm(a, b) {

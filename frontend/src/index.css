@@ -54,7 +54,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .brand h1 {
   margin: 0; font-family: var(--serif); font-weight: 600; font-size: 40px; letter-spacing: -0.5px; line-height: 1;
 }
-.tagline { font-family: var(--hand); font-size: 22px; color: var(--ink-soft); }
+.tagline { display: block; margin-top: 4px; font-family: var(--hand); font-size: 20px; color: var(--ink-soft); }
 
 .range {
   display: flex; border: 1.5px solid var(--ink); border-radius: 999px; padding: 3px; background: rgba(251, 246, 236, 0.7);
@@ -65,8 +65,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .range button[aria-selected='true'] { background: var(--ink); color: var(--page); }
 
 .summary {
-  position: absolute; top: 92px; left: 28px; max-width: 360px; pointer-events: none;
+  position: absolute; top: 104px; left: 28px; max-width: 360px; pointer-events: none;
 }
+/* A soft halo of paper behind the text, so it stays readable over a zoomed-in map. */
+.brand, .summary { text-shadow: 0 0 6px var(--paper), 0 0 12px var(--paper), 0 0 2px var(--paper); }
 .sentence { margin: 0; font-family: var(--serif); font-size: 19px; line-height: 1.5; }
 .home-line { margin: 8px 0 0; font-size: 13px; color: var(--ink-soft); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .seal-dot { width: 10px; height: 10px; background: var(--vermilion); border-radius: 2px; display: inline-block; }
@@ -232,7 +234,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .brand h1 { font-size: 30px; }
   .tagline { font-size: 17px; display: block; max-width: 190px; line-height: 1.1; }
   .range button { padding: 6px 12px; font-size: 14px; }
-  .summary { top: 112px; left: 16px; right: 16px; }
+  .summary { top: 132px; left: 16px; right: 16px; }
   .sentence { font-size: 16px; }
   .timeline { bottom: 64px; }
   .privacy { font-size: 10px; bottom: 8px; }
@@ -340,4 +342,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @media (max-width: 720px) {
   .controls { gap: 6px; }
   .home-picker { position: fixed; left: 16px; right: 16px; top: 120px; width: auto; z-index: 5; }
+}
+
+/* Phones: keep the long title compact and the summary clear of it. */
+@media (max-width: 720px) {
+  :root .brand h1 { font-size: 30px; }
+  :root .tagline { font-size: 15px; }
+  .summary { top: 132px; }
 }
