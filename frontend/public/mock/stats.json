@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "all_time": {
+    "trips": 2,
+    "cities": 3,
+    "countries": 2,
+    "days_away": 7,
+    "distance_km": 942,
+    "photos_total": 10,
+    "photos_with_gps": 10,
+    "top_tags": [
+      [
+        "food",
+        0.4
+      ],
+      [
+        "architecture",
+        0.3
+      ],
+      [
+        "city",
+        0.3
+      ]
+    ],
+    "persona": "Food Explorer"
+  },
+  "by_year": {
+    "2026": {
+      "trips": 2,
+      "cities": 3,
+      "countries": 2,
+      "days_away": 7,
+      "distance_km": 942,
+      "photos_total": 10,
+      "photos_with_gps": 10,
+      "top_tags": [
+        [
+          "food",
+          0.4
+        ],
+        [
+          "architecture",
+          0.3
+        ],
+        [
+          "city",
+          0.3
+        ]
+      ],
+      "persona": "Food Explorer"
+    }
+  }
+}

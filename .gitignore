@@ -9,3 +9,8 @@ data/
 node_modules/
 __pycache__/
 .venv/
+frontend/public/data/
+*.csv
+!results/*.csv
+.claude/settings.local.json
+.claude/worktrees/
