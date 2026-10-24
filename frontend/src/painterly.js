@@ -59,23 +59,43 @@ function render(img) {
   })
 }
 
-// One shared worker; jobs queue up inside it and run one at a time.
+// One shared worker; jobs queue up inside it and run one at a time. If workers are
+// blocked (some sandboxed pages), fall back to painting on the main thread.
 let worker = null
 let nextId = 0
 const pending = new Map()
 function runWorker(buffer, w, h) {
+  if (worker === false) return paintHere(buffer, w, h)
   if (!worker) {
-    worker = new PaintWorker()
+    try {
+      worker = new PaintWorker()
+    } catch {
+      worker = false
+      return paintHere(buffer, w, h)
+    }
     worker.onmessage = (e) => {
-      pending.get(e.data.id)?.(e.data.buffer)
+      pending.get(e.data.id)?.resolve(e.data.buffer)
       pending.delete(e.data.id)
+    }
+    worker.onerror = () => {
+      worker = false
+      for (const job of pending.values()) job.retry()
+      pending.clear()
     }
   }
   const id = nextId++
+  const copy = buffer.slice(0) // kept in case the worker fails and the job must be redone here
   return new Promise((resolve) => {
-    pending.set(id, resolve)
+    pending.set(id, { resolve, retry: () => paintHere(copy, w, h).then(resolve) })
     worker.postMessage({ id, w, h, buffer }, [buffer])
   })
+}
+
+async function paintHere(buffer, w, h) {
+  const { paintPixels } = await import('./paintCore.js')
+  await new Promise((r) => setTimeout(r, 0)) // let the page breathe between paintings
+  paintPixels(new Uint8ClampedArray(buffer), w, h)
+  return buffer
 }
 
 // A short poetic title for a painting, chosen by the photo's tag and id so it stays stable.
