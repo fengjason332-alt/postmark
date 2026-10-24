@@ -304,7 +304,7 @@ const GlobeView = forwardRef(function GlobeView(
         el.addEventListener('pointerenter', () => { spin.current.hover = true; touch() })
         el.addEventListener('pointerleave', () => { spin.current.hover = false; touch() })
         el.appendChild(button)
-                d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.7, tagW: 22 + city.name.length * 7.6 }
+                d = { key: `stamp:${city.id}`, lat: city.lat, lng: city.lng, el, signature, kind: 'stamp', rank: 1e9 + city.photo_count, w: px, h: px * 0.95, tagW: 22 + city.name.length * 7.6 }
       }
       d.el._city = city
       next.set(city.id, d)

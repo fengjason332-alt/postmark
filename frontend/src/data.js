@@ -65,7 +65,7 @@ export function storyline(trips) {
   const legs = {} // trip id -> [{ start, end }] in story time
   const keys = [] // [story time, day number] points the bar's date is read from
   if (!trips.length) return { legs, total: 0, dayAt: () => 0 }
-  keys.push([0, dayNumber(trips[0].start_date) - 3])
+  keys.push([0, dayNumber(trips[0].start_date)])
   let pos = GAP
   for (const trip of trips) {
     legs[trip.id] = legTimes(trip).map((leg) => {
@@ -77,13 +77,14 @@ export function storyline(trips) {
     })
     pos += GAP
   }
-  keys.push([pos, dayNumber(trips[trips.length - 1].end_date) + 3])
+  const last = dayNumber(trips[trips.length - 1].end_date) + 0.99 // the date never runs past the last trip
+  keys.push([pos, last])
   const dayAt = (t) => {
     let i = 1
     while (i < keys.length - 1 && keys[i][0] < t) i++
     const [t0, d0] = keys[i - 1]
     const [t1, d1] = keys[i]
-    return d0 + (d1 - d0) * Math.max(0, Math.min(1, (t - t0) / (t1 - t0 || 1)))
+    return Math.min(last, d0 + (d1 - d0) * Math.max(0, Math.min(1, (t - t0) / (t1 - t0 || 1))))
   }
   return { legs, total: pos, dayAt }
 }
