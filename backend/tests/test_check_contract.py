@@ -100,6 +100,24 @@ class DefectTests(MockCopyCase):
         self.mutate_trips(damage)
         self.assert_fails_with("city_id is not one of the trip's cities")
 
+    def test_city_without_photos_is_a_warning_not_an_error(self):
+        removed = {}
+
+        def damage(doc):
+            trip = doc["trips_by_radius"]["50"][0]
+            city = trip["cities"][0]["id"]
+            removed.update(trip=trip["id"], city=city)
+            for photo in trip["photos"]:
+                if photo["city_id"] == city:
+                    photo["city_id"] = None
+            doc["trips"] = doc["trips_by_radius"]["50"]
+        self.mutate_trips(damage)
+        for mode in ("mock", "data"):
+            result = check_contract.check(self.folder, mode)
+            self.assertEqual(result.errors, [], mode)
+            self.assertIn(f"trip {removed['trip']} city {removed['city']} has no photos",
+                          result.warnings, mode)
+
     def test_no_gps_photo_with_coordinates(self):
         def damage(doc):
             doc["trips_by_radius"]["50"][0]["photos"][0]["has_gps"] = False

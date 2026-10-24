@@ -286,7 +286,7 @@ class PhotoTests(BuiltCase):
     def test_photo_near_real_home_snaps_to_home_city_centre(self):
         photo = self.photo("a4")
         self.assertEqual((photo["lat"], photo["lng"], photo["has_gps"], photo["city_id"]),
-                         (12.5, 34.5, True, None))
+                         (12.5, 34.5, True, "city_alpha_xl"))   # coordinates snapped, city kept
 
     def test_snap_disc_is_centred_on_the_city_centre_and_grown_by_the_home_offset(self):
         # Preconditions of the geometry used below (haversine in the test, not in the code).
@@ -301,12 +301,12 @@ class PhotoTests(BuiltCase):
     def test_photo_8_km_from_real_home_on_the_far_side_is_snapped(self):
         photo = self.photo("a7")
         self.assertEqual((photo["lat"], photo["lng"], photo["has_gps"], photo["city_id"]),
-                         (12.5, 34.5, True, None))
+                         (12.5, 34.5, True, "city_alpha_xl"))
 
     def test_photo_inside_enlarged_disc_but_far_from_real_home_is_snapped(self):
         photo = self.photo("a8")
         self.assertEqual((photo["lat"], photo["lng"], photo["has_gps"], photo["city_id"]),
-                         (12.5, 34.5, True, None))
+                         (12.5, 34.5, True, "city_alpha_xl"))
 
     def test_photo_outside_the_disc_keeps_its_coordinates(self):
         lat, lng = north(CENTRE_A, 40.0)
@@ -330,7 +330,7 @@ class PhotoTests(BuiltCase):
         # b4 lies 3 km from the home of period 4 but belongs to a trip of period 2.
         photo = self.photo("b4")
         self.assertEqual((photo["lat"], photo["lng"], photo["has_gps"], photo["city_id"]),
-                         (CENTRE_B[0], CENTRE_B[1], True, None))
+                         (CENTRE_B[0], CENTRE_B[1], True, "city_delta_xm"))
 
     def test_photo_near_a_home_without_city_inside_another_periods_trip_is_hidden(self):
         photo = self.photo("b5")
@@ -511,16 +511,281 @@ class ConsoleAndContractTests(BuiltCase):
         self.assertRegex(lines[5], r"^trips\.json: \d+\.\d KB, stats\.json: \d+\.\d KB$")
         self.assertEqual(lines[6], "Missing thumbnails: 20 of 21 photos")
         self.assertEqual(lines[7], "Privacy check: OK")
-        self.assertRegex(lines[8], r"^Contract 1\.1 \(data\): OK \(\d+ checks\), 1 warnings$")
+        self.assertRegex(lines[8], r"^Contract 1\.1 \(data\): OK \(\d+ checks\), 7 warnings$")
         self.assertEqual(len(lines), 9)
 
     def test_output_passes_the_contract_checker_in_data_mode(self):
         import check_contract
         result = check_contract.check(self.root / "frontend" / "public" / "data", "data")
         self.assertEqual(result.errors, [])
-        self.assertEqual(len(result.warnings), 1)       # a6 has no UTC offset
+        # a6 has no UTC offset; trip C (r10, r25, r50) lists two cities and has no GPS photo to give them
+        self.assertEqual(len(result.warnings), 7)
+        self.assertEqual(sum("has no photos" in w for w in result.warnings), 6)
         self.assertEqual(result.missing_thumbs, 40)     # 20 photos x (_s, _l)
         self.assertEqual(result.total_thumbs, 42)
+
+
+# ---- every trip city gets photos -----------------------------------------------------------
+
+def city_point_dict(city_id, lat, lng):
+    return {"id": city_id, "lat": lat, "lng": lng}
+
+
+def synthetic_photo(pid, city=None, gps=True):
+    return {"id": pid, "has_gps": gps, "city_id": city}
+
+
+class EnsureCityPhotosTests(unittest.TestCase):
+    CITIES = [city_point_dict("c_x", 0.0, 0.0), city_point_dict("c_y", 0.0, 10.0)]
+
+    def run_ensure(self, photos, points, cities=None, snapped=frozenset()):
+        build_json.ensure_city_photos(self.CITIES if cities is None else cities, photos, points,
+                                      snapped)
+        return {p["id"]: p["city_id"] for p in photos}
+
+    def test_nothing_changes_when_every_city_has_a_photo(self):
+        photos = [synthetic_photo("a", "c_x"), synthetic_photo("b", "c_y"), synthetic_photo("n")]
+        got = self.run_ensure(photos, {"a": (0.0, 0.0), "b": (0.0, 10.0), "n": (0.0, 9.0)})
+        self.assertEqual(got, {"a": "c_x", "b": "c_y", "n": None})
+
+    def test_step_a_gives_each_unlabelled_gps_photo_its_nearest_city(self):
+        photos = [synthetic_photo("a"), synthetic_photo("b"), synthetic_photo("c")]
+        got = self.run_ensure(photos, {"a": (0.0, 1.0), "b": (0.0, 9.0), "c": (0.0, 2.0)})
+        self.assertEqual(got, {"a": "c_x", "b": "c_y", "c": "c_x"})
+
+    def test_step_a_runs_when_only_one_city_is_empty_and_leaves_labelled_photos_alone(self):
+        photos = [synthetic_photo("a", "c_x"), synthetic_photo("n1"), synthetic_photo("n2")]
+        got = self.run_ensure(photos, {"a": (0.0, 9.0), "n1": (0.0, 8.0), "n2": (0.0, 1.0)})
+        self.assertEqual(got, {"a": "c_x", "n1": "c_y", "n2": "c_x"})
+
+    def test_step_b_moves_the_nearest_candidate_to_an_empty_city(self):
+        # All three unlabelled photos are nearest to c_y; c_x takes the one closest to it.
+        photos = [synthetic_photo("a"), synthetic_photo("b"), synthetic_photo("c")]
+        got = self.run_ensure(photos, {"a": (0.0, 6.0), "b": (0.0, 8.0), "c": (0.0, 9.0)})
+        self.assertEqual(got, {"a": "c_x", "b": "c_y", "c": "c_y"})
+
+    def test_step_b_never_empties_another_city(self):
+        photos = [synthetic_photo("a")]
+        got = self.run_ensure(photos, {"a": (0.0, 9.0)})
+        self.assertEqual(got, {"a": "c_y"})     # c_x stays empty: c_y would lose its only photo
+
+    def test_step_b_only_moves_photos_that_were_unlabelled_before(self):
+        photos = [synthetic_photo("keep", "c_y"), synthetic_photo("n")]
+        got = self.run_ensure(photos, {"keep": (0.0, 0.0), "n": (0.0, 9.0)})
+        # c_x is empty; step a gives n to c_y; step b moves n (c_y still has keep).
+        self.assertEqual(got, {"keep": "c_y", "n": "c_x"})
+        photos = [synthetic_photo("keep", "c_y")]
+        self.assertEqual(self.run_ensure(photos, {"keep": (0.0, 0.0)}), {"keep": "c_y"})
+
+    def test_step_b_runs_in_visit_order_for_several_empty_cities(self):
+        cities = self.CITIES + [city_point_dict("c_z", 0.0, 20.0)]
+        photos = [synthetic_photo(k) for k in "abcd"]
+        points = {"a": (0.0, 11.0), "b": (0.0, 12.0), "c": (0.0, 13.0), "d": (0.0, 14.0)}
+        got = self.run_ensure(photos, points, cities)
+        # step a: all four nearest to c_y; step b: c_x takes a (nearest to it), c_z takes d
+        self.assertEqual(got, {"a": "c_x", "b": "c_y", "c": "c_y", "d": "c_z"})
+
+    def test_step_a_leaves_a_snapped_unlabelled_photo_without_a_city(self):
+        photos = [synthetic_photo("r1"), synthetic_photo("r2"), synthetic_photo("snap")]
+        got = self.run_ensure(photos, {"r1": (0.0, 1.0), "r2": (0.0, 9.0), "snap": (0.0, 8.0)},
+                              snapped={"snap"})
+        self.assertEqual(got, {"r1": "c_x", "r2": "c_y", "snap": None})
+
+    def test_step_b_prefers_an_unsnapped_candidate_over_a_nearer_snapped_one(self):
+        # c_x is nearest to the snapped photo "s" (km 1), but "a" (km 6) is a real-position
+        # photo that was given c_y in step a and c_y keeps "b".
+        photos = [synthetic_photo("s"), synthetic_photo("a"), synthetic_photo("b")]
+        got = self.run_ensure(photos, {"s": (0.0, 1.0), "a": (0.0, 6.0), "b": (0.0, 9.0)},
+                              snapped={"s"})
+        self.assertEqual(got, {"s": None, "a": "c_x", "b": "c_y"})
+
+    def test_step_b_uses_a_snapped_still_unlabelled_photo_when_it_is_the_only_way(self):
+        photos = [synthetic_photo("real"), synthetic_photo("s1"), synthetic_photo("s2")]
+        points = {"real": (0.0, 9.0), "s1": (0.0, 8.0), "s2": (0.0, 2.0)}
+        got = self.run_ensure(photos, points, snapped={"s1", "s2"})
+        # "real" goes to c_y and cannot leave it; the nearer snapped photo s2 fills c_x.
+        self.assertEqual(got, {"real": "c_y", "s1": None, "s2": "c_x"})
+
+    def test_snapped_photos_alone_can_fill_an_empty_trip(self):
+        photos = [synthetic_photo("s1"), synthetic_photo("s2")]
+        got = self.run_ensure(photos, {"s1": (0.0, 1.0), "s2": (0.0, 9.0)}, snapped={"s1", "s2"})
+        self.assertEqual(got, {"s1": "c_x", "s2": "c_y"})
+
+    def test_photos_without_gps_never_get_a_city(self):
+        photos = [synthetic_photo("n", gps=False), synthetic_photo("g")]
+        got = self.run_ensure(photos, {"g": (0.0, 1.0)})
+        self.assertEqual(got, {"n": None, "g": "c_x"})
+
+    def test_no_cities_or_no_photos_is_a_no_op(self):
+        self.assertEqual(self.run_ensure([], {}), {})
+        photos = [synthetic_photo("g")]
+        self.assertEqual(self.run_ensure(photos, {"g": (0.0, 0.0)}, cities=[]), {"g": None})
+
+
+class CityCoverageTests(BuiltCase):
+    def city_counts(self, trip):
+        counts = {c["id"]: 0 for c in trip["cities"]}
+        for photo in trip["photos"]:
+            if photo["city_id"] is not None:
+                counts[photo["city_id"]] += 1
+        return counts
+
+    def test_snapped_photos_keep_their_trip_city_with_snapped_coordinates(self):
+        for key, trip_key, city in (("a4", "A", "city_alpha_xl"), ("b4", "B", "city_delta_xm")):
+            for radius in ("10", "25", "50", "100"):
+                try:
+                    photo = self.photo(key, trip_key, radius)
+                except StopIteration:
+                    continue
+                self.assertEqual(photo["city_id"], city, (key, radius))
+                self.assertIn((photo["lat"], photo["lng"]), (CENTRE_A, CENTRE_B), (key, radius))
+
+    def test_hidden_photos_keep_a_null_city(self):
+        for key in ("b5", "c1"):
+            photo = self.photo(key)
+            self.assertEqual((photo["has_gps"], photo["city_id"]), (False, None), key)
+
+    def test_trip_with_unlabelled_photos_and_an_empty_city_gets_the_nearest_city(self):
+        # Trip E lists only Zeta; its photos carry a city that is not a trip city, so the two
+        # real-position photos are given Zeta and the snapped e2 stays without a city.
+        trip = self.trip("E")
+        self.assertEqual([p["city_id"] for p in trip["photos"]],
+                         ["city_zeta_xm", None, "city_zeta_xm"])
+        self.assertEqual(self.city_counts(trip), {"city_zeta_xm": 2})
+
+    def test_trip_with_no_unlabelled_gps_photo_keeps_its_empty_cities(self):
+        trip = self.trip("C")
+        self.assertEqual(self.city_counts(trip), {"city_epsilon_xl": 0, "city_epsb_xl": 0})
+        self.assertTrue(all(p["city_id"] is None for p in trip["photos"]))
+
+    def test_checker_reports_empty_cities_as_warnings_not_errors(self):
+        import check_contract
+        result = check_contract.check(self.root / "frontend" / "public" / "data", "data")
+        self.assertEqual(result.errors, [])
+        messages = [w for w in result.warnings if "has no photos" in w]
+        self.assertIn(f"trip {TRIP_IDS['C']} city city_epsilon_xl has no photos", messages)
+        self.assertIn(f"trip {TRIP_IDS['C']} city city_epsb_xl has no photos", messages)
+        self.assertEqual(len(messages), 6)
+
+    def test_every_city_of_the_other_trips_has_a_photo(self):
+        for radius, trip_list in self.trips["trips_by_radius"].items():
+            for trip in trip_list:
+                if trip["id"] == TRIP_IDS["C"]:
+                    continue
+                self.assertTrue(all(n > 0 for n in self.city_counts(trip).values()), (radius, trip["id"]))
+
+    def test_city_photo_count_comes_from_the_csv_and_is_not_recomputed(self):
+        self.assertEqual([c["photo_count"] for c in self.trip("E")["cities"]], [3])
+        self.assertEqual([c["photo_count"] for c in self.trip("C")["cities"]], [1, 1])
+        self.assertEqual([c["photo_count"] for c in self.trip("D")["cities"]], [1, 5])
+
+    def test_trips_whose_cities_are_all_covered_are_identical_without_the_step(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            make_root(tmp)
+            with mock.patch.object(build_json, "ensure_city_photos", lambda *args: None):
+                code, _ = run_main(tmp)
+            plain = json.loads((Path(tmp) / "frontend" / "public" / "data" / "trips.json").read_text(encoding="utf-8"))
+        self.assertEqual(code, 0)
+        for radius, trip_list in self.trips["trips_by_radius"].items():
+            others = {t["id"]: t for t in plain["trips_by_radius"][radius]}
+            for trip in trip_list:
+                if trip["id"] in (TRIP_IDS["B"], TRIP_IDS["E"]):
+                    continue
+                self.assertEqual(json.dumps(trip, sort_keys=True),
+                                 json.dumps(others[trip["id"]], sort_keys=True), (radius, trip["id"]))
+
+
+class CityCoverageVariantTests(unittest.TestCase):
+    """Edit the synthetic inputs, rebuild, and look at the resulting trip."""
+
+    def build_variant(self, edit):
+        with tempfile.TemporaryDirectory() as tmp:
+            make_root(tmp, with_thumb=False)
+            processed = Path(tmp) / "data" / "processed"
+            edit(processed)
+            code, text = run_main(tmp)
+            doc = json.loads((Path(tmp) / "frontend" / "public" / "data" / "trips.json").read_text(encoding="utf-8"))
+            trips_text = (Path(tmp) / "frontend" / "public" / "data" / "trips.json").read_text(encoding="utf-8")
+        self.assertEqual(code, 0)
+        self.assertIn("Privacy check: OK", text.splitlines())
+        for sentinel in (REAL_HOME_TEXT, repr(REAL_HOME_3[0]), repr(REAL_HOME_4[0])):
+            self.assertNotIn(sentinel, text + trips_text)
+        return doc
+
+    @staticmethod
+    def edit_csv(path, function):
+        frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+        function(frame).to_csv(path, index=False)
+
+    def trip(self, doc, key, radius="50"):
+        return next(t for t in doc["trips_by_radius"][radius] if t["id"] == TRIP_IDS[key])
+
+    def city_of(self, trip, key):
+        return next(p for p in trip["photos"] if p["id"] == PHOTO_ID[key])["city_id"]
+
+    def test_snapped_photo_whose_city_is_not_a_trip_city_gets_null(self):
+        def edit(processed):
+            self.edit_csv(processed / "photo_cities.csv",
+                          lambda f: f.assign(city_id=f["city_id"].where(f["photo_id"] != PHOTO_ID["a4"],
+                                                                        "city_gamma_xl")))
+        doc = self.build_variant(edit)
+        trip = self.trip(doc, "A")
+        photo = next(p for p in trip["photos"] if p["id"] == PHOTO_ID["a4"])
+        self.assertEqual((photo["lat"], photo["lng"], photo["city_id"]), (12.5, 34.5, None))
+        self.assertEqual(self.city_of(trip, "a7"), "city_alpha_xl")   # trip A was already covered
+
+    def test_near_trip_gives_its_city_to_every_unlabelled_unsnapped_gps_photo(self):
+        def edit(processed):
+            self.edit_csv(processed / "photo_cities.csv",
+                          lambda f: f[~f["photo_id"].isin([PHOTO_ID[k] for k in ("b1", "b3", "b4", "b5")])])
+        doc = self.build_variant(edit)
+        for radius in ("10", "25", "50", "100"):
+            trip = self.trip(doc, "B", radius)
+            by_key = {k: self.city_of(trip, k) for k in ("b1", "b2", "b3", "b4", "b5")}
+            self.assertEqual(by_key, {"b1": "city_delta_xm", "b2": None, "b3": "city_delta_xm",
+                                      "b4": None, "b5": None}, radius)   # b4 is snapped
+            snapped = next(p for p in trip["photos"] if p["id"] == PHOTO_ID["b4"])
+            self.assertEqual((snapped["lat"], snapped["lng"]), CENTRE_B)
+
+    def trip_a_with_only(self, keep):
+        """Trip A (cities Alpha at 10,20 and Beta at 11,20) with every photo unlabelled."""
+        def edit(processed):
+            drop = {PHOTO_ID[k] for k, _, t, *_ in PHOTOS if t == "A" and k not in keep}
+            self.edit_csv(processed / "photo_cities.csv",
+                          lambda f: f[~f["photo_id"].str.startswith("p_a")])
+            for radius in RADIUS_TRIPS:
+                self.edit_csv(processed / f"photo_trips_r{radius}.csv",
+                              lambda f: f[~f["photo_id"].isin(drop)])
+        return edit
+
+    def test_main_city_without_labelled_photos_is_given_the_nearest_photo(self):
+        # a5 and a6 are both nearer to Beta than to Alpha; a6 is the one nearest to Alpha.
+        # a4, a7, a8 are snapped: they stay without a city.
+        doc = self.build_variant(self.trip_a_with_only({"a2", "a4", "a5", "a6", "a7", "a8"}))
+        trip = self.trip(doc, "A")
+        got = {k: self.city_of(trip, k) for k in ("a2", "a4", "a5", "a6", "a7", "a8")}
+        self.assertEqual(got, {"a2": None, "a4": None, "a5": "city_beta_xl",
+                               "a6": "city_alpha_xl", "a7": None, "a8": None})
+        photo = next(p for p in trip["photos"] if p["id"] == PHOTO_ID["a4"])
+        self.assertEqual((photo["lat"], photo["lng"]), CENTRE_A)       # still snapped
+
+    def test_snapped_photo_fills_an_empty_city_only_when_no_unsnapped_photo_can_move(self):
+        # a6 is the only real-position photo (goes to Beta and cannot leave); snapped a4 (still
+        # without a city) fills Alpha, as the nearest snapped candidate.
+        doc = self.build_variant(self.trip_a_with_only({"a2", "a4", "a6"}))
+        trip = self.trip(doc, "A")
+        got = {k: self.city_of(trip, k) for k in ("a2", "a4", "a6")}
+        self.assertEqual(got, {"a2": None, "a4": "city_alpha_xl", "a6": "city_beta_xl"})
+        photo = next(p for p in trip["photos"] if p["id"] == PHOTO_ID["a4"])
+        self.assertEqual((photo["lat"], photo["lng"]), CENTRE_A)
+
+    def test_city_stays_empty_when_giving_it_a_photo_would_empty_another(self):
+        doc = self.build_variant(self.trip_a_with_only({"a2", "a6"}))
+        trip = self.trip(doc, "A")
+        self.assertEqual(self.city_of(trip, "a6"), "city_beta_xl")
+        self.assertEqual([p["city_id"] for p in trip["photos"] if p["id"] == PHOTO_ID["a2"]], [None])
+        self.assertEqual(sorted(c["id"] for c in trip["cities"]), ["city_alpha_xl", "city_beta_xl"])
 
 
 class PrivacySelfCheckTests(unittest.TestCase):

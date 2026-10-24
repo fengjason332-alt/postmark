@@ -288,6 +288,10 @@ def _check_trip(c, trip, radius, mode, paths):
                 c.ok(start <= arrive and leave <= end, f"{where}: city dates outside the trip")
     for photo in photos:
         _check_photo(c, photo, trip, where, mode, paths, start, end)
+    used = {p.get("city_id") for p in photos if isinstance(p, dict)}
+    for city in cities:
+        if isinstance(city, dict) and "id" in city and city["id"] not in used:
+            c.warn(f"trip {trip['id']} city {city['id']} has no photos")
     return True
 
 

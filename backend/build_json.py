@@ -218,6 +218,49 @@ def pick_cover(title, cities, photos, snapped=frozenset()):
     return candidates[len(candidates) // 2]["id"]
 
 
+def ensure_city_photos(cities, photos, true_points, snapped=frozenset()):
+    """Give every city of a trip at least one photo, when the trip has GPS photos without a city.
+
+    Only runs if some city has no photo. Photos snapped to a home city centre (`snapped`) are
+    left without a city in step a, because their published position is not their real one.
+    a) Every GPS photo with a real position and no city gets the nearest trip city (distance
+    from the photo's true position to the city centre; internal only).
+    b) A city that still has no photo takes, nearest first: (i) one of the photos that were
+    unlabelled before step a and are not snapped, as long as its current city keeps at least one
+    photo; else (ii) a snapped photo that is still unlabelled (this can never empty a city).
+    c) Otherwise the city stays empty (the checker warns). Photos without GPS never get a city.
+    """
+    counts = defaultdict(int)
+    for photo in photos:
+        if photo["city_id"] is not None:
+            counts[photo["city_id"]] += 1
+    if not cities or all(counts[c["id"]] > 0 for c in cities):
+        return
+
+    def km(photo, city):
+        lat, lng = true_points[photo["id"]]
+        return float(segment.haversine_km(lat, lng, city["lat"], city["lng"]))
+
+    unlabelled = [p for p in photos if p["has_gps"] and p["city_id"] is None]
+    real = [p for p in unlabelled if p["id"] not in snapped]
+    for photo in real:
+        photo["city_id"] = min(cities, key=lambda c: km(photo, c))["id"]
+        counts[photo["city_id"]] += 1
+    for city in cities:
+        if counts[city["id"]] > 0:
+            continue
+        tiers = ([p for p in real if counts[p["city_id"]] > 1],
+                 [p for p in unlabelled if p["id"] in snapped and p["city_id"] is None])
+        for candidates in tiers:
+            if candidates:
+                photo = min(candidates, key=lambda p: km(p, city))
+                if photo["city_id"] is not None:
+                    counts[photo["city_id"]] -= 1
+                photo["city_id"] = city["id"]
+                counts[city["id"]] += 1
+                break
+
+
 class SizeResolver:
     """Photo width/height: real _l.webp size if generated, else scaled raw size, else default."""
 
@@ -287,13 +330,16 @@ def build_photo(row, trip_city_ids, periods, photo_city, sizes):
             snapped = True
         else:
             out_lat, out_lng = round4(lat), round4(lng)
+        if action != "hide":
+            # The city label is not a position: a snapped photo keeps it like any other photo.
             candidate = photo_city.get(pid, "")
             city_id = candidate if candidate in trip_city_ids else None
     width, height = sizes.resolve(pid, row["file_name"], row["taken_at"])
+    true_point = (lat, lng) if has_gps else None   # internal only; never written out
     return ({"id": pid, "taken_at": row["taken_at"], "date": row["date"],
              "lat": out_lat, "lng": out_lng, "has_gps": has_gps, "city_id": city_id,
              "thumb": f"thumbs/{pid}_s.webp", "full": f"thumbs/{pid}_l.webp",
-             "width": width, "height": height, "tags": []}, snapped)
+             "width": width, "height": height, "tags": []}, snapped, true_point)
 
 
 def build_radius(frames, photo_rows, photo_city, periods, sizes):
@@ -321,8 +367,11 @@ def build_radius(frames, photo_rows, photo_city, periods, sizes):
         city_ids = {c["id"] for c in cities}
         members = sorted(photos_by_trip.get(trip_id, []), key=sort_key)
         built = [build_photo(m, city_ids, periods, photo_city, sizes) for m in members]
-        photos = [photo for photo, _ in built]
-        snapped = {photo["id"] for photo, was_snapped in built if was_snapped}
+        photos = [photo for photo, _, _ in built]
+        snapped = {photo["id"] for photo, was_snapped, _ in built if was_snapped}
+        ensure_city_photos(cities, photos,
+                           {photo["id"]: point for photo, _, point in built if point is not None},
+                           snapped)
         trips.append({
             "id": trip_id, "index": index, "title": row["title"],
             "start_date": row["start_date"], "end_date": row["end_date"],
