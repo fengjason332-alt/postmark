@@ -4,3 +4,5 @@ pandas
 numpy
 scikit-learn
 matplotlib
+torch
+open_clip_torch
