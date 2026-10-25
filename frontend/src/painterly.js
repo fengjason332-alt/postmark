@@ -6,19 +6,26 @@ import { useEffect, useState } from 'react'
 import PaintWorker from './paintWorker.js?worker&inline'
 
 const cache = new Map() // src -> Promise<dataURL>
+const done = new Map() // src -> dataURL, once finished, so a second look shows it on the first frame
 const MAX = 520 // longest side of the painting, in pixels
 
 export function paint(src) {
-  if (!cache.has(src)) cache.set(src, load(src).then(render))
+  if (!cache.has(src)) cache.set(src, load(src).then(render).then((u) => { done.set(src, u); return u }))
   return cache.get(src)
+}
+
+// Start the painting and download the photo ahead of a click (e.g. on hover), so the viewer opens ready.
+export function prepare(src) {
+  paint(src).catch(() => {})
 }
 
 // React helper: the painted data URL, or null while it is still being made.
 // Pass enabled=false to hold off (e.g. until the photo scrolls into view).
 export function usePainting(src, enabled = true) {
-  const [url, setUrl] = useState(null)
+  const [url, setUrl] = useState(() => done.get(src) ?? null)
   useEffect(() => {
     if (!enabled) return undefined
+    if (done.has(src)) { setUrl(done.get(src)); return undefined }
     let live = true
     paint(src).then((u) => live && setUrl(u)).catch(() => live && setUrl(src))
     return () => { live = false }

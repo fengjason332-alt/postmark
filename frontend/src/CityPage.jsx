@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { dateRange, jitter, tripColor } from './data.js'
 import { Lightbox, Picture, useEscape } from './Logbook.jsx'
+import { prepare } from './painterly.js'
 
 const TIMES = ['', 'Once', 'Twice', 'Three times', 'Four times', 'Five times']
 
@@ -28,7 +29,7 @@ export default function CityPage({ city, base, onClose, onOpenTrip }) {
                 </header>
                 <div className="collage">
                   {photos.map((p) => (
-                    <figure key={p.id} className="taped" style={{ '--tilt': `${jitter(p.id, 3)}deg` }} onClick={() => setPhoto(p)}>
+                    <figure key={p.id} className="taped" style={{ '--tilt': `${jitter(p.id, 3)}deg` }} onPointerEnter={() => prepare(base + p.full)} onPointerDown={() => prepare(base + p.full)} onClick={(e) => setPhoto({ p, el: e.currentTarget })}>
                       <Picture src={base + p.thumb} alt={`${city.name} ${p.date}`} loading="lazy" />
                     </figure>
                   ))}
@@ -38,7 +39,7 @@ export default function CityPage({ city, base, onClose, onOpenTrip }) {
           })}
         </section>
       </article>
-      {photo && <Lightbox photo={photo} base={base} place={city.name} onClose={() => setPhoto(null)} />}
+      {photo && <Lightbox photo={photo.p} base={base} place={city.name} onClose={() => setPhoto(null)} />}
     </div>
   )
 }

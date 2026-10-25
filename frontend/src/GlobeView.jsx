@@ -10,16 +10,18 @@ import { BORDER_COLOR, citiesOf, DRAW_MS, distanceKm, STAY, tripColor } from './
 import { angularDistance, createBorderLayers, createHomeRing, loadCities, visibleCities } from './geoLayers.js'
 
 const FADED = 0.16 // how bright a leg stays once the route has moved on
-const REST = 0.55 // brightness of every route once all legs have flown
+const REST = 0.85 // brightness of every route once all legs have flown (fine lines need firm ink)
 const DIMMED = 0.45 // while a trip is hovered, the other routes step back to this share of their brightness
 const SPIN_RESUME_MS = 1200 // the idle spin turns again this long after the user lets go of the globe
 // Route line styles; ?line=pencil or ?line=stitch in the URL tries the others.
-// Stroke 0.6 keeps every line thick enough to hover and click.
+// The drawn lines stay fine; each leg also gets an invisible, wider twin (HIT_STROKE)
+// so a thin line is still easy to hover and click.
 const LINES = {
-  ink: { stroke: 0.6, dash: 1, gap: 0 }, // solid ink
-  pencil: { stroke: 0.6, dash: 0.022, gap: 0.014 }, // short pencil dashes
-  stitch: { stroke: 0.6, dash: 0.005, gap: 0.016 }, // dotted, like a stitched route
+  ink: { stroke: 0.16, dash: 1, gap: 0 }, // fine solid ink
+  pencil: { stroke: 0.16, dash: 0.022, gap: 0.012 }, // short pencil dashes
+  stitch: { stroke: 0.24, dash: 0.005, gap: 0.016 }, // dotted, like a stitched route
 }
+const HIT_STROKE = 0.7
 const line = LINES[new URLSearchParams(window.location.search).get('line')] ?? LINES.ink
 const FLY_MS = 1200 // camera flight to a trip or a city; App opens the page once it has landed
 const RING_COLOR = '#a8473a' // the home circle shares the home seal's vermilion
@@ -289,6 +291,26 @@ const GlobeView = forwardRef(function GlobeView(
     return [...next.values()]
   }, [trips, story, home])
 
+  // Invisible wide twins of the legs, only there to catch the pointer. They neither draw nor
+  // hide anything: their materials are switched to write no colour and no depth.
+  const allArcs = useMemo(() => [...arcs, ...arcs.map((a) => ({ hit: true, key: `${a.key}:hit`, trip: a.trip, from: a.from, to: a.to, gap: 0 }))], [arcs])
+  useEffect(() => {
+    let raf = 0
+    let tries = 0
+    const hide = () => {
+      let pending = false
+      for (const d of allArcs) {
+        if (!d.hit) continue
+        const m = d.__threeObjArc?.material
+        if (!m) pending = true
+        else if (m.colorWrite || m.depthWrite) Object.assign(m, { colorWrite: false, depthWrite: false })
+      }
+      if (pending && ++tries < 120) raf = requestAnimationFrame(hide)
+    }
+    hide()
+    return () => cancelAnimationFrame(raf)
+  }, [allArcs])
+
   // During a replay, every leg is drawn exactly as far as the timeline knob is through its
   // stretch, glows while its stamp lands, then fades as the route moves on.
   const replay = cursor !== null
@@ -550,13 +572,14 @@ const GlobeView = forwardRef(function GlobeView(
   // The hovered trip shows at full strength and the others step back.
   const hovered = hoverTrip && trips.some((t) => t.id === hoverTrip) ? hoverTrip : null // ignore a trip that left the view
   const arcColor = useMemo(() => (d) => {
+    if (d.hit) return 'rgba(0,0,0,0)'
     const c = tripColor(d.trip)
     let glow = d.glow ?? 1
     if (hovered) glow = d.trip.id === hovered ? 1 : glow * DIMMED
     return [hexAlpha(c, glow * 0.96), hexAlpha(c, glow * (d.homeward ? 0.6 : 0.86))]
   }, [tick, cursor, hovered]) // eslint-disable-line react-hooks/exhaustive-deps
   // A new accessor identity each tick tells react-globe.gl to re-read the offsets.
-  const dashGap = useMemo(() => (d) => d.gap, [tick, cursor]) // eslint-disable-line react-hooks/exhaustive-deps
+  const dashGap = useMemo(() => (d) => (d.hit ? 0 : d.gap), [tick, cursor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={`globe ${picking ? 'picking' : ''}`} ref={wrap}>
@@ -574,16 +597,16 @@ const GlobeView = forwardRef(function GlobeView(
         showAtmosphere
         atmosphereColor="#c9cdd0"
         atmosphereAltitude={0.13}
-        arcsData={arcs}
+        arcsData={allArcs}
         arcStartLat={(d) => d.from.lat}
         arcStartLng={(d) => d.from.lng}
         arcEndLat={(d) => d.to.lat}
         arcEndLng={(d) => d.to.lng}
         arcColor={arcColor}
-        arcStroke={line.stroke}
+        arcStroke={(d) => (d.hit ? HIT_STROKE : line.stroke)}
         arcAltitudeAutoScale={0.32}
-        arcDashLength={replay ? 1 : line.dash}
-        arcDashGap={replay ? 2 : line.gap}
+        arcDashLength={(d) => (d.hit ? 1 : replay ? 1 : line.dash)}
+        arcDashGap={(d) => (d.hit ? 0 : replay ? 2 : line.gap)}
         arcDashInitialGap={dashGap}
         arcsTransitionDuration={0}
         arcLabel={(d) => `${d.trip.title} · ${d.trip.start_date}`}

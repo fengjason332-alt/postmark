@@ -276,7 +276,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cover { position: relative; background-color: #f8f1e2; }
 .route { list-style: none; padding: 0; margin: 26px 0 0; font-size: 15px; line-height: 2; }
 .route .hand { font-size: 20px; color: var(--trip); margin-right: 4px; }
-.cover-stamp { position: absolute; right: 26px; bottom: 22px; width: 112px; transform: rotate(-10deg); opacity: 0.85; }
+.cover-stamp { position: absolute; right: 26px; bottom: 22px; z-index: 2; width: 112px; transform: rotate(-10deg); opacity: 0.85; pointer-events: none; } /* stays on top when the cover photo lifts on hover */
 
 .taped {
   position: relative; margin: 0; padding: 7px 7px 9px; background: #fffdf7;
@@ -306,12 +306,29 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .lightbox {
   position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px;
-  background: rgba(40, 32, 22, 0.6); cursor: zoom-out; animation: fade 0.25s both;
+  background: rgba(40, 32, 22, 0.6); cursor: zoom-out;
 }
 .lightbox figure { margin: 0; background: #fffdf7; padding: 12px 12px 8px; max-width: min(1100px, 100%); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35); }
 .lightbox img { display: block; max-width: 100%; max-height: calc(100vh - 140px); }
 .lightbox figcaption { font-size: 22px; padding-top: 6px; }
-
+.gouache-card { background: rgba(236, 231, 222, 0.94); }
+.gouache-card figure {
+  display: flex; flex-direction: column; align-items: center; gap: 22px;
+  background: #f6f2ea; padding: 36px 48px 30px; max-height: calc(100vh - 48px); overflow: auto;
+  box-shadow: 0 24px 60px -20px rgba(30, 36, 44, 0.35);
+}
+.gouache-card img { max-height: calc((100vh - 220px) / 2); max-width: min(560px, 80vw); }
+.gouache-card .original { box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.4); }
+/* Both pictures keep the photo's shape from the first frame, so the card never jumps while they load. */
+.gouache-card figure { border-radius: 14px; }
+.gouache-card .shot {
+  width: min(560px, 80vw, calc((100vh - 220px) / 2 * var(--ar))); height: auto; max-width: none; max-height: none;
+  aspect-ratio: var(--ar); object-fit: contain; border-radius: 8px;
+}
+.gouache-card .original.shot { object-fit: cover; background: #ece6da; }
+.gouache-card figcaption { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; text-align: center; }
+.gouache-card strong { font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 500; font-size: 30px; color: #2f3a45; }
+.gouache-card figcaption span { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 15px; letter-spacing: 1px; color: #6f7680; }
 /* ---------- phones ---------- */
 @media (max-width: 720px) {
   .masthead { padding: 16px 16px 0; }
@@ -411,18 +428,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .painting-wait.big { width: min(520px, 80vw); }
 @keyframes shimmer { to { background-position: -200% 0; } }
-.gouache-card { background: rgba(236, 231, 222, 0.94); }
-.gouache-card figure {
-  display: flex; flex-direction: column; align-items: center; gap: 22px;
-  background: #f6f2ea; padding: 36px 48px 30px; max-height: calc(100vh - 48px); overflow: auto;
-  box-shadow: 0 24px 60px -20px rgba(30, 36, 44, 0.35);
-}
-.gouache-card img { max-height: calc((100vh - 220px) / 2); max-width: min(560px, 80vw); }
-.gouache-card .original { box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.4); }
-.gouache-card figcaption { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0; text-align: center; }
-.gouache-card strong { font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 500; font-size: 30px; color: #2f3a45; }
-.gouache-card figcaption span { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 15px; letter-spacing: 1px; color: #6f7680; }
-
 @media (max-width: 720px) {
   .controls { gap: 6px; }
   .home-picker { position: fixed; left: 16px; right: 16px; top: 172px; width: auto; z-index: 5; }
@@ -461,48 +466,38 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .book { display: flex; flex-direction: column; height: min(760px, 100%); }
 .book::after { left: 50%; }
 .book.paged::after { bottom: 48px; }
-.spread {
-  flex: 1; min-height: 0;
-  display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr);
-  perspective: 1800px;
-}
-.book.single .spread { grid-template-columns: 1fr; }
 .leaf { min-height: 0; overflow-y: auto; }
 :root .day-page { padding: 34px 44px 28px; }
-/* A page turn: one sheet swings around the spine. Its front is the old page, its back is the page
-   that lands on the other side; both darken a little as they tilt away from the light. */
-.spread { position: relative; }
-.spread.turning .leaf { pointer-events: none; }
-.sheet {
-  position: absolute; top: 0; bottom: 0; width: 50%; z-index: 3;
-  transform-style: preserve-3d; pointer-events: none; will-change: transform;
+/* The paper book (page-flip): the pages sit on a dim desk, turn with a real curl and shadow,
+   and each page darkens a little towards the spine. */
+.overlay:has(.book.flipping) { background: rgba(38, 30, 20, 0.6); }
+.book.flipping {
+  width: min(1240px, 100%); height: 100%; background: transparent; box-shadow: none; border-radius: 0;
+  overflow: visible; animation: fade 0.4s ease both;
 }
-.sheet.one { width: 100%; }
-/* --p (0 to 1) is how far the sheet has turned, --bend (0 to 1 to 0) how much it bows on the way. */
-.sheet-next { left: 50%; transform-origin: left center; transform: rotateY(calc(var(--p, 0) * -180deg)) scaleY(calc(1 - var(--bend, 0) * 0.025)); }
-.sheet-next.one { left: 0; }
-.sheet-prev { left: 0; transform-origin: right center; transform: rotateY(calc(var(--p, 0) * 180deg)) scaleY(calc(1 - var(--bend, 0) * 0.025)); }
-.sheet-face {
-  position: absolute; inset: 0; display: flex; overflow: hidden;
-  backface-visibility: hidden; -webkit-backface-visibility: hidden;
-  box-shadow: 0 0 34px rgba(40, 28, 12, 0.28);
+.book.flipping::after { display: none; }
+.book-stage { flex: 1; min-height: 0; position: relative; }
+.flip-stage { position: absolute; inset: 0; display: grid; place-items: center; }
+.bk-page { background: transparent center / 100% 100% no-repeat; overflow: hidden; } /* lokta paper, see paper.js */
+.bk-page.paper-0 { background-image: var(--paper-0); }
+.bk-page.paper-1 { background-image: var(--paper-1); }
+.bk-page.paper-2 { background-image: var(--paper-2); }
+.bk-page.paper-cover { background-image: var(--paper-cover); }
+:root .bk-page > .leaf { height: 100%; overflow: hidden; background: transparent; }
+.bk-page::after { content: ''; position: absolute; top: 0; bottom: 0; width: 34px; pointer-events: none; }
+.bk-page.--left::after { right: 0; background: linear-gradient(90deg, transparent, rgba(60, 44, 24, 0.16)); }
+.bk-page.--right::after { left: 0; background: linear-gradient(270deg, transparent, rgba(60, 44, 24, 0.16)); }
+.flipbook { filter: drop-shadow(0 22px 30px rgba(20, 14, 6, 0.45)); }
+/* keep the paper matte: the library's banded shadows soften into a blur */
+.stf__innerShadow { opacity: 0.35 !important; filter: blur(10px); mix-blend-mode: multiply; }
+.stf__hardInnerShadow { opacity: 0.3 !important; filter: blur(8px); mix-blend-mode: multiply; }
+.stf__outerShadow, .stf__hardShadow { filter: blur(4px); }
+.book.flipping .close { top: 4px; right: 4px; color: var(--page); z-index: 4; }
+.book.flipping .turn { background: rgba(246, 242, 234, 0.9); }
+.book.flipping .pager {
+  align-self: center; width: min(620px, 100%); margin-top: 10px; border: 0; border-radius: 999px;
+  background: var(--page); box-shadow: 0 6px 18px -8px rgba(0, 0, 0, 0.5);
 }
-.sheet-face > .leaf { flex: 1; min-width: 0; overflow: hidden; }
-.sheet-face.back { transform: rotateY(180deg); }
-.sheet-face::after { /* the page darkens as it tilts away from the light */
-  content: ''; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(90deg, rgba(40, 28, 12, 0.5), rgba(40, 28, 12, 0.05) 60%, rgba(40, 28, 12, 0.35));
-}
-.sheet-face.front::after { opacity: calc(var(--p, 0) * 0.55); }
-.sheet-face.back::after { opacity: calc((1 - var(--p, 0)) * 0.55); }
-.sheet-face::before { /* a soft highlight across the bowed page, strongest halfway */
-  content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  opacity: calc(var(--bend, 0) * 0.5);
-  background: linear-gradient(90deg, transparent 25%, rgba(255, 255, 255, 0.6) 50%, transparent 75%);
-}
-.book.paged .spread { cursor: grab; touch-action: pan-y; }
-.spread.turning { cursor: grabbing; user-select: none; -webkit-user-select: none; }
-@media (prefers-reduced-motion: reduce) { .sheet { display: none; } }
 
 .day-head {
   position: relative; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px;
